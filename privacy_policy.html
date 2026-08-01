@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מדיניות פרטיות · Kolmus</title>
+<style>
+:root{--bg:#0a0a0a;--card:#141414;--line:#2a2a2a;--text:#f4f4f4;--muted:#9a9a9a;--gold:#d4af37;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"Noto Sans Hebrew",sans-serif;line-height:1.7;}
+.wrap{max-width:640px;margin:0 auto;padding:24px 18px 60px;}
+h1{color:var(--gold);font-size:22px;}
+h2{color:var(--gold);font-size:16px;margin-top:24px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0;}
+.muted{color:var(--muted);font-size:13px;}
+a{color:var(--gold);}
+.toggle{display:flex;gap:8px;margin-bottom:16px;}
+.toggle button{flex:1;background:var(--card);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px;font-weight:600;cursor:pointer;}
+.toggle button.on{border-color:var(--gold);color:var(--gold);}
+[data-lang]{display:none;}
+[data-lang].show{display:block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toggle">
+    <button id="bhe" class="on" onclick="setL('he')">עברית</button>
+    <button id="ben" onclick="setL('en')">English</button>
+  </div>
+
+  <div data-lang="he" class="show">
+    <h1>מדיניות פרטיות — Kolmus (קולמוס)</h1>
+    <p class="muted">עודכן: 2026 · © AppNest</p>
+    <div class="card">
+      <h2>הכול על המכשיר שלך</h2>
+      <p>Kolmus שומר את כל התמלולים וההגדרות על המכשיר שלך בלבד (localStorage). אין חשבון, אין שרת של AppNest, ואיננו אוספים או רואים את הנתונים שלך.</p>
+    </div>
+    <div class="card">
+      <h2>מה נשלח החוצה — ומתי</h2>
+      <p>האפליקציה שולחת מידע החוצה רק כשאתה בעצמך מפעיל תמלול או פעולת בינה:</p>
+      <ul>
+        <li><b>תמלול קובץ</b> — קובץ האודיו/וידאו שבחרת נשלח ישירות לספק שבחרת (Gemini של גוגל, או OpenAI, או ה-Endpoint המותאם שלך). המפתח שלך נשמר על המכשיר ומשמש רק לשליחה ישירה לספק.</li>
+        <li><b>הקלטה חיה</b> — שימוש בזיהוי הדיבור של הדפדפן שולח את האודיו לשירות הדיבור של יצרן הדפדפן (למשל גוגל ב-Chrome).</li>
+        <li><b>שיפור / סיכום / תרגום</b> — טקסט התמלול נשלח לספק הבינה שבחרת.</li>
+      </ul>
+      <p>שום מפתח API ושום נתון לא עוברים דרך שרת של AppNest — הכול ישירות בינך לבין הספק.</p>
+    </div>
+    <div class="card">
+      <h2>מיקרופון</h2>
+      <p>המיקרופון פועל רק כשאתה מתחיל הקלטה. אין הקלטה ברקע.</p>
+    </div>
+    <div class="card">
+      <h2>אין מעקב</h2>
+      <p>אין אנליטיקה, אין פרסום, אין קובצי מעקב. שליטה מלאה: אפשר לגבות, לשחזר ולמחוק את כל הנתונים בכל רגע דרך ההגדרות.</p>
+    </div>
+    <div class="card">
+      <h2>הבהרה</h2>
+      <p>התמלול הוא הערכה אוטומטית ועלול לכלול טעויות. אמת מידע חשוב. יצירת קשר: <a href="mailto:appnest55@gmail.com">appnest55@gmail.com</a></p>
+    </div>
+  </div>
+
+  <div data-lang="en">
+    <h1>Privacy Policy — Kolmus</h1>
+    <p class="muted">Updated: 2026 · © AppNest</p>
+    <div class="card">
+      <h2>Everything stays on your device</h2>
+      <p>Kolmus stores all transcripts and settings only on your device (localStorage). No account, no AppNest server, and we do not collect or see your data.</p>
+    </div>
+    <div class="card">
+      <h2>What is sent out — and when</h2>
+      <p>The app sends data out only when you start a transcription or an AI action:</p>
+      <ul>
+        <li><b>File transcription</b> — the audio/video file you pick is sent directly to the provider you chose (Google Gemini, OpenAI, or your custom endpoint). Your key stays on device and is used only to call that provider directly.</li>
+        <li><b>Live recording</b> — using the browser's speech recognition sends audio to the browser vendor's speech service (e.g. Google in Chrome).</li>
+        <li><b>Improve / summarize / translate</b> — the transcript text is sent to the AI provider you chose.</li>
+      </ul>
+      <p>No API key and no data pass through any AppNest server — everything goes directly between you and the provider.</p>
+    </div>
+    <div class="card">
+      <h2>Microphone</h2>
+      <p>The microphone runs only while you are recording. There is no background recording.</p>
+    </div>
+    <div class="card">
+      <h2>No tracking</h2>
+      <p>No analytics, no ads, no trackers. Full control: back up, restore, or delete all data anytime from Settings.</p>
+    </div>
+    <div class="card">
+      <h2>Disclaimer</h2>
+      <p>Transcripts are automated estimates and may contain errors. Verify important information. Contact: <a href="mailto:appnest55@gmail.com">appnest55@gmail.com</a></p>
+    </div>
+  </div>
+</div>
+<script>
+function setL(l){
+  document.querySelectorAll('[data-lang]').forEach(e=>e.classList.toggle('show', e.getAttribute('data-lang')===l));
+  document.getElementById('bhe').classList.toggle('on', l==='he');
+  document.getElementById('ben').classList.toggle('on', l==='en');
+  document.documentElement.lang=l; document.documentElement.dir = l==='he'?'rtl':'ltr';
+}
+</script>
+</body>
+</html>

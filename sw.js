@@ -1,5 +1,5 @@
 /* Kolmus service worker */
-const VERSION = 'timlulai-v1';
+const VERSION = 'timlulai-v2';
 const CORE = ['./', './index.html', './manifest.json', './privacy_policy.html',
               './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {

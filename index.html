@@ -175,6 +175,7 @@ const LANG = {
     key:'מפתח API', model:'מודל', baseurl:'כתובת בסיס', test:'בדוק חיבור', disconnect:'נתק',
     connected:'מחובר', notconn:'לא מחובר', testing:'בודק…', save_key:'שמור',
     howget:'איך משיגים מפתח:', freevid:'סרטון: מפתח Gemini חינמי',
+    refresh_models:'רענן מודלים (מהחשבון שלך)', model_list:'רשימת המודלים הרשמית',
     // settings
     username:'שם משתמש', username_ph:'שם / כינוי', language:'שפה', theme:'עיצוב',
     palette:'ערכת צבעים', daynight:'יום / לילה', backup:'גיבוי (JSON)', restore:'שחזור',
@@ -223,6 +224,7 @@ const LANG = {
     key:'API key', model:'Model', baseurl:'Base URL', test:'Test connection', disconnect:'Disconnect',
     connected:'Connected', notconn:'Not connected', testing:'Testing…', save_key:'Save',
     howget:'How to get a key:', freevid:'Video: free Gemini key',
+    refresh_models:'Refresh models (from your account)', model_list:'Official model list',
     username:'Username', username_ph:'Name / nickname', language:'Language', theme:'Theme',
     palette:'Color palette', daynight:'Day / night', backup:'Backup (JSON)', restore:'Restore',
     deleteall:'Delete all', notif:'Notifications', pdf:'Export PDF (print)',
@@ -271,6 +273,8 @@ let S = load('settings', {
   wantTs:false,
 });
 if(!S.ai) S.ai={ provider:'web', keys:{}, models:{}, base:'', connected:{} };
+// migrate deprecated Gemini model ids (gemini-1.x / 2.x are being shut down)
+if(S.ai.models && /gemini-(1|2)[.\-]/.test(S.ai.models.gem||'')){ delete S.ai.models.gem; save('settings',S); }
 let transcripts = load('transcripts', []);
 let current = null; // working transcript {text, segments, lang, at}
 
@@ -536,19 +540,38 @@ function wireResult(){
 function fileToBase64(file){ return new Promise((res,rej)=>{ const r=new FileReader();
   r.onload=()=>res(r.result.split(',')[1]); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); }); }
 
+/* ---------- Gemini model handling (fallback + live list) ---------- */
+const GEM_DEFAULT='gemini-3.6-flash';
+const GEM_FALLBACKS=['gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite','gemini-3-flash-preview'];
+function geminiCandidates(){
+  const first=(S.ai.models&&S.ai.models.gem)||GEM_DEFAULT;
+  return [...new Set([first, ...GEM_FALLBACKS])];
+}
+async function geminiGenerate(key, body){
+  let lastErr;
+  for(const model of geminiCandidates()){
+    const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){
+      const data=await r.json();
+      return (data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('\n').trim();
+    }
+    const errText=(await r.text()).slice(0,300);
+    lastErr=new Error('Gemini '+r.status+': '+errText);
+    // model gone/unavailable → try the next candidate; any other error → stop now
+    if(!(r.status===404 || r.status===400 && /not\s*(found|available|supported)|no longer available/i.test(errText))) throw lastErr;
+  }
+  throw lastErr||new Error('Gemini: no available model');
+}
 async function transcribeGemini(file, lang, wantTs){
-  const key=S.ai.keys.gem; const model=S.ai.models.gem||'gemini-2.5-flash';
+  const key=S.ai.keys.gem;
   const b64=await fileToBase64(file);
   const langName = lang==='auto'?'the spoken language':(LANGOPTS.find(o=>o[0]===lang)||[,lang])[1];
   const prompt = wantTs
     ? `Transcribe this audio verbatim in ${langName}. Return ONLY a JSON array of segments, no markdown, each like {"start":<seconds>,"end":<seconds>,"text":"..."}. Keep segments short (one sentence).`
     : `Transcribe this audio verbatim in ${langName}. Return ONLY the transcript text, no comments.`;
-  const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
   const body={ contents:[{ parts:[ {text:prompt}, {inline_data:{mime_type:file.type||'audio/mpeg', data:b64}} ] }] };
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!r.ok){ throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,200)); }
-  const data=await r.json();
-  const txt=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('\n').trim();
+  const txt=await geminiGenerate(key, body);
   if(wantTs){ const segs=parseSegments(txt); return { text: segs.map(s=>s.text).join(' '), segments:segs }; }
   return { text:txt, segments:null };
 }
@@ -626,13 +649,8 @@ async function callChat(prov, userText){
     if(!r.ok) throw new Error('OpenAI '+r.status);
     const d=await r.json(); return d.choices?.[0]?.message?.content||'';
   }
-  // gemini
-  const model=S.ai.models.gem||'gemini-2.5-flash';
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(S.ai.keys.gem)}`,
-    {method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({contents:[{parts:[{text:userText}]}]})});
-  if(!r.ok) throw new Error('Gemini '+r.status);
-  const d=await r.json(); return (d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('\n');
+  // gemini (with model fallback)
+  return await geminiGenerate(S.ai.keys.gem, {contents:[{parts:[{text:userText}]}]});
 }
 
 /* ---------- subtitle formatting ---------- */
@@ -750,7 +768,7 @@ function doRestore(e){
 const PROVIDERS=[
   {id:'web', tag:'free', name:()=>T('prov_web'), role:'stt'},
   {id:'gem', tag:'free', name:()=>T('prov_gem'), role:'both', key:true, keyUrl:'https://aistudio.google.com/app/apikey',
-    video:'https://www.youtube.com/watch?v=Cl4XKgz6EJQ', models:['gemini-2.5-flash','gemini-2.0-flash','gemini-1.5-flash'], defModel:'gemini-2.5-flash'},
+    video:'https://www.youtube.com/watch?v=Cl4XKgz6EJQ', models:['gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite','gemini-3-flash-preview'], defModel:'gemini-3.6-flash'},
   {id:'oai', tag:'api', name:()=>T('prov_oai'), role:'both', key:true, keyUrl:'https://platform.openai.com/api-keys',
     models:['gpt-transcribe','gpt-4o-mini-transcribe','whisper-1'], defModel:'gpt-transcribe'},
   {id:'claude', tag:'api', name:()=>T('prov_claude'), role:'assist', key:true, keyUrl:'https://console.anthropic.com',
@@ -786,11 +804,13 @@ function showProvConfig(id){
   const p=PROVIDERS.find(x=>x.id===id); const box=document.getElementById('provConfig'); if(!p||!box) return;
   if(p.id==='web'){ box.innerHTML=`<div class="card"><p class="hint">${T('live_note')} ${T('nomic')}</p></div>`; return; }
   const curKey=S.ai.keys[id]||''; const curModel=S.ai.models[id]||p.defModel||'';
+  const modelList = (id==='gem' && S.ai.gemModels && S.ai.gemModels.length) ? S.ai.gemModels : p.models;
   box.innerHTML=`<div class="card">
     <div class="h2">${p.name()}</div>
     ${p.base?`<label>${T('baseurl')}</label><input id="cfgBase" value="${esc(S.ai.base||'http://localhost:11434')}" placeholder="http://localhost:11434">`:''}
     ${p.key?`<label>${T('key')}</label><input id="cfgKey" type="password" value="${esc(curKey)}" placeholder="sk-...">`:''}
-    ${p.models?`<label>${T('model')}</label><select id="cfgModel">${p.models.map(m=>`<option ${m===curModel?'selected':''}>${m}</option>`).join('')}</select>`:''}
+    ${p.models?`<label>${T('model')}</label><select id="cfgModel">${modelList.map(m=>`<option ${m===curModel?'selected':''}>${m}</option>`).join('')}</select>
+      ${id==='gem'?`<button class="btn sm" id="cfgRefresh" style="margin-top:8px">🔄 ${T('refresh_models')}</button>`:''}`:''}
     <div class="row" style="margin-top:12px">
       <button class="btn sm gold" id="cfgSave">💾 ${T('save_key')}</button>
       <button class="btn sm" id="cfgTest">🔌 ${T('test')}</button>
@@ -798,7 +818,8 @@ function showProvConfig(id){
     </div>
     <p class="hint" id="cfgStatus"></p>
     <p class="hint">${T('howget')} <a href="${p.keyUrl}" target="_blank" rel="noopener">${p.keyUrl.replace('https://','')}</a>
-      ${p.video?`<br>🎬 <a href="${p.video}" target="_blank" rel="noopener">${T('freevid')}</a>`:''}</p>
+      ${p.video?`<br>🎬 <a href="${p.video}" target="_blank" rel="noopener">${T('freevid')}</a>`:''}
+      ${id==='gem'?`<br>📋 <a href="https://ai.google.dev/gemini-api/docs/models" target="_blank" rel="noopener">${T('model_list')}</a>`:''}</p>
     ${p.role==='assist'?`<p class="hint">ℹ️ Claude ${S.lang==='he'?'לא מבצע תמלול אודיו — משמש לשיפור/סיכום/תרגום של התמלול.':'does not transcribe audio — used to improve/summarize/translate the transcript.'}</p>`:''}
   </div>`;
   const kEl=document.getElementById('cfgKey'), mEl=document.getElementById('cfgModel'), bEl=document.getElementById('cfgBase');
@@ -808,6 +829,8 @@ function showProvConfig(id){
     if(bEl) S.ai.base=bEl.value.trim();
     persist(); toast(T('saved'));
   };
+  const rf=document.getElementById('cfgRefresh');
+  if(rf) rf.onclick=()=>{ if(kEl) S.ai.keys.gem=kEl.value.trim(); persist(); refreshGeminiModels(); };
   document.getElementById('cfgDisc').onclick=()=>{ delete S.ai.keys[id]; if(S.ai.connected) delete S.ai.connected[id];
     persist(); go('ai'); };
   document.getElementById('cfgTest').onclick=async()=>{
@@ -825,6 +848,26 @@ async function testProvider(id){
     if(!r.ok) throw new Error('OpenAI '+r.status); return true; }
   if(id==='custom'){ const base=(S.ai.base||'').replace(/\/$/,''); const r=await fetch(base+'/v1/models',
     {headers: S.ai.keys.custom?{'Authorization':'Bearer '+S.ai.keys.custom}:{}}); if(!r.ok) throw new Error('HTTP '+r.status); return true; }
+}
+async function refreshGeminiModels(){
+  const key=S.ai.keys.gem; const st=document.getElementById('cfgStatus');
+  if(!key){ toast(T('need_key')); return; }
+  if(st) st.textContent=T('testing');
+  try{
+    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=200`);
+    if(!r.ok) throw new Error('HTTP '+r.status+': '+(await r.text()).slice(0,80));
+    const d=await r.json();
+    const list=(d.models||[])
+      .filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent'))
+      .map(m=>(m.name||'').replace(/^models\//,''))
+      .filter(n=>/gemini/i.test(n) && !/embedding|aqa/i.test(n));
+    if(!list.length) throw new Error('empty');
+    S.ai.gemModels=list;
+    if(!list.includes(S.ai.models.gem)) S.ai.models.gem = list.find(n=>/3\.6-flash/.test(n)) || list.find(n=>/flash/.test(n)) || list[0];
+    persist(); showProvConfig('gem');
+    const st2=document.getElementById('cfgStatus');
+    if(st2) st2.innerHTML=`🟢 ${(S.lang==='he'?'נמצאו ':'Found ')}${list.length}${(S.lang==='he'?' מודלים זמינים':' available models')}`;
+  }catch(e){ if(st) st.innerHTML=`🔴 ${esc((e.message||'').slice(0,100))}`; }
 }
 
 /* ---------- ABOUT ---------- */

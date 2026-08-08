@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src *; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>תמלולAI · TimlulAI</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -65,6 +67,8 @@ label{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px;}
 input,select,textarea{width:100%;background:#0e0e0e;border:1px solid var(--line);
   color:var(--text);border-radius:12px;padding:13px;font-size:15px;font-family:inherit;}
 textarea{min-height:150px;resize:vertical;line-height:1.6;}
+audio,video{width:100%;margin-top:10px;border-radius:12px;background:#080808;max-height:300px;}
+.segment-list{max-height:260px;overflow:auto;margin:10px 0;border:1px solid var(--line);border-radius:12px;padding:6px}.segment{display:flex;gap:10px;width:100%;text-align:start;border:0;border-radius:9px;padding:9px;background:transparent;color:var(--text);cursor:pointer}.segment:hover,.segment.active{background:rgba(212,175,55,.16)}.segment-time{color:var(--gold);font-variant-numeric:tabular-nums;white-space:nowrap}.segment-text{flex:1}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);}
 .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5;}
 .hint a{color:var(--gold);}
@@ -84,6 +88,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);}
 .tr .meta{font-size:12px;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between;gap:8px;}
 .tr .snip{font-size:14px;line-height:1.5;max-height:60px;overflow:hidden;}
 .tr .acts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
+.tr .tr-title{font-size:16px;font-weight:700;margin-bottom:5px;overflow-wrap:anywhere;}
+.library-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;}
+.library-controls .search{grid-column:1/-1;}
+.statusrow{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;}
+.statusrow:last-child{border-bottom:0;}.statusvalue{font-weight:700;text-align:end;}
 /* misc */
 .center{text-align:center;}
 .muted{color:var(--muted);}
@@ -106,6 +115,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1c1c1c;
   border:1px solid var(--gold);color:var(--text);padding:12px 18px;border-radius:30px;
   font-size:14px;z-index:80;box-shadow:0 8px 30px rgba(0,0,0,.5);}
+.appnotice{position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top));z-index:90;
+  max-width:536px;margin:auto;background:#1c1c1c;border:1px solid var(--gold);border-radius:14px;
+  padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 30px rgba(0,0,0,.55);font-size:13px;}
+.appnotice span{flex:1}.appnotice .btn{margin:0;min-height:38px;white-space:nowrap;}
 .palettes{display:flex;gap:10px;flex-wrap:wrap;}
 .sw{width:44px;height:44px;border-radius:12px;border:2px solid var(--line);cursor:pointer;
   display:flex;align-items:center;justify-content:center;}
@@ -125,6 +138,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);}
 <div class="app" id="app"><!-- rendered by JS --></div>
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
+<div id="noticeRoot"></div>
 
 <script>
 /* ============================================================
@@ -135,13 +149,14 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);}
 /* ---------- storage shim (memory fallback) ---------- */
 const mem = {};
 const store = {
-  get(k){ try{ return localStorage.getItem(k); }catch(e){ return mem[k]??null; } },
-  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){ mem[k]=v; } },
-  del(k){ try{ localStorage.removeItem(k); }catch(e){ delete mem[k]; } }
+  get(k){ try{ const v=localStorage.getItem(k); return v==null?(mem[k]??null):v; }catch(e){ return mem[k]??null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); if(localStorage.getItem(k)!==v) throw new Error('verify failed'); delete mem[k]; return true; }
+    catch(e){ mem[k]=v; return false; } },
+  del(k){ delete mem[k]; try{ localStorage.removeItem(k); return localStorage.getItem(k)==null; }catch(e){ return false; } }
 };
 const PFX='kolmus_';
 function load(k,def){ const v=store.get(PFX+k); if(v==null) return def; try{return JSON.parse(v);}catch(e){return def;} }
-function save(k,v){ store.set(PFX+k, JSON.stringify(v)); }
+function save(k,v){ try{return store.set(PFX+k,JSON.stringify(v));}catch(e){return false;} }
 
 /* ---------- palettes ---------- */
 const PALETTES = {
@@ -161,10 +176,17 @@ const LANG = {
     source:'שפת המקור', pickfile:'בחר קובץ אודיו', pickfileV:'בחר אודיו / וידאו',
     pickfile_sub:'בחר קובץ מהטלפון או מהמחשב — האפליקציה תתמלל אותו.', change:'שנה',
     file_needs_key:'לתמלול קובץ צריך מנוע עם מפתח (Gemini חינמי / OpenAI).',
+    file_limit:'מגבלת קובץ', bad_type:'סוג הקובץ אינו נתמך במנוע שנבחר', cancel_job:'בטל תמלול', cancelled:'התמלול בוטל',
+    timed_out:'הבקשה ארכה זמן רב מדי והופסקה', bad_key:'מפתח ה־API שגוי או חסר הרשאה', quota_err:'המכסה הסתיימה או שיש הגבלת קצב', network_err:'לא ניתן להתחבר לספק. בדוק את החיבור לאינטרנט', file_too_large:'הקובץ גדול מדי למנוע שנבחר',
+    cloud_processing:'עיבוד בענן', audio_sent:'קובץ האודיו/וידאו יישלח ישירות אל', text_sent:'טקסט התמלול יישלח ישירות אל', provider_charges:'השימוש עשוי לצרוך מכסה חינמית או לגרור חיוב בחשבון הספק.', agree_continue:'אני מבין, המשך', choose_live_lang:'בהקלטה חיה יש לבחור שפה מפורשת; זיהוי אוטומטי אינו נתמך בדפדפן.',
+    bad_base:'כתובת ה־Custom Endpoint אינה תקינה. יש להזין כתובת HTTP או HTTPS מלאה.',
+    file_size:'גודל', duration:'משך', preparing_file:'מכין את הקובץ…', sending_provider:'שולח לספק וממתין לתוצאה…', elapsed:'זמן שעבר', retry:'נסה שוב', jump_back:'10 שניות אחורה', jump_forward:'10 שניות קדימה', playback_speed:'מהירות ניגון', timed_segments:'קטעים לפי זמן — לחיצה מעבירה לנקודה המתאימה', words:'מילים', characters:'תווים', undo_change:'בטל שינוי אחרון', restored:'הטקסט הקודם שוחזר', import_transcript:'ייבוא תמלול או כתוביות', import_transcript_sub:'אפשר לפתוח TXT, SRT או VTT, לערוך ולשמור בספרייה ללא שליחה לענן.', imported:'התמלול יובא בהצלחה', import_failed:'לא ניתן לקרוא את קובץ התמלול', uploading_long:'מעלה קובץ ארוך ל־Gemini', processing_media:'Gemini מכין את קובץ המדיה', direct_url:'קישור ישיר לקובץ מדיה', direct_url_ph:'https://example.com/lesson.mp3', direct_url_note:'עד 100MB. הקישור חייב להפנות ישירות לקובץ שהורדתו מותרת; דפי YouTube וקורסים מוגנים אינם קישור ישיר.', load_url:'טען קישור', downloading:'מוריד קובץ', bad_media_url:'הקישור אינו קישור HTTPS תקין או שהאתר חסם את הגישה', download_too_large:'הקובץ בקישור גדול מ־100MB', screen_awake:'המסך יישאר פעיל בזמן התמלול',
     orlive:'או הקלטה חיה', startrec:'התחל הקלטה', stoprec:'עצור', recording:'מקליט…',
     transcribe:'תמלל', transcribing:'מתמלל… זה עשוי לקחת רגע', engine:'מנוע תמלול',
     result:'תוצאת התמלול', editable:'אפשר לערוך את הטקסט לפני שמירה',
     copy:'העתק', copied:'הועתק!', savehist:'שמור להיסטוריה', saved:'נשמר',
+    updatehist:'עדכן תמלול', draft:'טיוטה שלא נשמרה', continue_draft:'המשך טיוטה', discard_draft:'מחק טיוטה',
+    discard_draft_q:'למחוק את הטיוטה הנוכחית ולהתחיל תמלול חדש?', replace_draft_q:'הפעולה תחליף את הטיוטה הנוכחית. להמשיך?',
     exp_txt:'ייצוא TXT', exp_srt:'ייצוא SRT', exp_vtt:'ייצוא VTT', share:'שתף',
     improve:'שפר וסכם (AI)', cleanup:'תקן פיסוק', summarize:'סכם', translate:'תרגם לאנגלית',
     ts_on:'כתוביות עם חותמות זמן', ts_hint:'זמין ב-Gemini / OpenAI whisper-1',
@@ -178,7 +200,12 @@ const LANG = {
     refresh_models:'רענן מודלים (מהחשבון שלך)', model_list:'רשימת המודלים הרשמית',
     // settings
     username:'שם משתמש', username_ph:'שם / כינוי', language:'שפה', theme:'עיצוב',
-    palette:'ערכת צבעים', daynight:'יום / לילה', backup:'גיבוי (JSON)', restore:'שחזור',
+    palette:'ערכת צבעים', daynight:'יום / לילה', backup:'גיבוי בטוח (JSON)', restore:'שחזור',
+    backup_keys:'גיבוי מלא עם מפתחות', backup_keys_q:'הגיבוי המלא יכיל את מפתחות ה־API שלך בטקסט גלוי. שמור אותו במקום פרטי ואל תשתף אותו. ליצור גיבוי מלא?',
+    restore_bad:'קובץ הגיבוי אינו תקין או אינו נתמך', restore_large:'קובץ הגיבוי גדול מדי',
+    restore_found:'נמצאו בגיבוי', restore_items:'תמלולים', restore_replace:'החלף הכול', restore_merge:'מזג תמלולים',
+    restore_note:'לפני השחזור יורד אוטומטית גיבוי חירום של המידע הקיים.', restore_done:'השחזור הושלם', restore_failed:'השחזור נכשל והמידע הקיים נשמר',
+    save_failed:'המידע נשאר פתוח, אך הדפדפן לא הצליח לשמור אותו במכשיר.', backup_now:'הורד גיבוי עכשיו', storage_low:'שטח האחסון במכשיר כמעט מלא. מומלץ להוריד גיבוי.',
     deleteall:'מחק הכל', notif:'התראות', pdf:'ייצוא PDF (הדפסה)',
     // about
     version:'גרסה', developer:'פותח', platform:'פלטפורמה', storage:'אחסון',
@@ -194,6 +221,12 @@ const LANG = {
     delall_q2:'בטוח לגמרי? כל התמלולים וההגדרות יימחקו.',
     restore_q:'שחזור יחליף את כל הנתונים הקיימים. להמשיך?',
     edit:'עריכה', del:'מחק', ok:'אישור', cancel:'ביטול', close:'סגור',
+    search_tr:'חיפוש בשם או בתוכן', newest:'החדשים תחילה', oldest:'הישנים תחילה', sort_name:'לפי שם', filter_all:'הכול', filter_file:'קבצים', filter_live:'הקלטות חיות', no_results:'לא נמצאו תמלולים מתאימים', tr_title:'שם התמלול', words:'מילים',
+    permissions_storage:'הרשאות ואחסון', mic_app:'מיקרופון באפליקציה', mic_permission:'הרשאת המערכת', enabled:'פעיל', disabled:'כבוי', granted:'מאושר', denied:'חסום', prompt:'טרם אושר', unknown:'לא ידוע', request_mic:'בדוק / בקש הרשאה', mic_disabled:'המיקרופון כבוי בהגדרות האפליקציה.', mic_help:'ההרשאה חסומה על ידי הדפדפן או הטלפון. פתח את פרטי האתר בדפדפן, בחר הרשאות, והעבר את המיקרופון למצב אפשר.', storage_local:'נתוני TimlulAI', storage_browser:'שימוש האפליקציה בדפדפן', storage_quota:'מכסת הדפדפן', persistent_storage:'אחסון מתמשך', request_persistent:'בקש אחסון מתמשך', supported:'נתמך', unsupported:'לא נתמך', installed:'מותקנת', browser_mode:'בדפדפן', online_status:'חיבור אינטרנט', folder_support:'גישה לתיקייה', speech_support:'זיהוי דיבור', transcripts_count:'מספר תמלולים',
+    device_folder:'תיקיית מכשיר', connect_folder:'בחר וחבר תיקייה', reconnect_folder:'חדש הרשאה לתיקייה', disconnect_folder:'נתק תיקייה', folder_connected:'מחוברת', folder_not_connected:'לא מחוברת', folder_disconnected_note:'ניתוק אינו מוחק קבצים שכבר נשמרו במכשיר.', auto_save_txt:'שמור TXT אוטומטית', save_device:'שמור במכשיר', saved_device:'נשמר עותק בתיקיית המכשיר', folder_needed:'יש לחבר תחילה תיקייה דרך ההגדרות.', folder_error:'לא ניתן לכתוב לתיקייה שנבחרה',
+    device_copy:'עותק במכשיר', delete_where:'היכן למחוק את התמלול?', delete_app_only:'מחק רק מהאפליקציה', delete_both:'מחק מהאפליקציה ומהמכשיר', deleted_app_only:'התמלול נמחק רק מהאפליקציה. העותק בתיקיית המכשיר נשאר.', deleted_both:'התמלול והעותק במכשיר נמחקו', delete_device_failed:'לא ניתן למחוק את העותק במכשיר. התמלול נשאר באפליקציה.', deleteall_external:'עותקים שנשמרו בתיקיית המכשיר לא יימחקו.',
+    save_audio_copy:'שמור גם את קובץ האודיו המקורי', audio_copy_note:'כבוי כברירת מחדל. קובצי אודיו עשויים לתפוס נפח רב ולהכיל מידע רגיש.', folder_files_size:'נפח הקבצים בתיקיית המשתמש', audio_saved:'האודיו המקורי נשמר', audio_not_available:'קובץ האודיו המקורי אינו זמין עוד; נשמר TXT בלבד.',
+    update_ready:'גרסה חדשה מוכנה', update_now:'עדכן עכשיו', offline_mode:'אין חיבור לאינטרנט — האפליקציה פועלת במצב מקומי', install_app:'התקן את האפליקציה', install_unavailable:'ההתקנה מתבצעת דרך תפריט הדפדפן: הוסף למסך הבית.',
     nomic:'הדפדפן לא תומך בהקלטה חיה. נסה Chrome, או חבר מפתח לתמלול קבצים.',
     live_note:'הקלטה חיה שולחת אודיו לשירות זיהוי הדיבור של הדפדפן.',
     disc:'הכלי מייצר הערכת תמלול ועלול לטעות. אמת פרטים חשובים. פיצ׳רי הבינה שולחים את האודיו/טקסט לספק שבחרת.',
@@ -211,10 +244,17 @@ const LANG = {
     source:'Source language', pickfile:'Pick audio file', pickfileV:'Pick audio / video',
     pickfile_sub:'Pick a file from your phone or computer — the app will transcribe it.', change:'Change',
     file_needs_key:'Transcribing a file needs an engine with a key (free Gemini / OpenAI).',
+    file_limit:'File limit', bad_type:'This file type is not supported by the selected engine', cancel_job:'Cancel transcription', cancelled:'Transcription cancelled',
+    timed_out:'The request took too long and was stopped', bad_key:'The API key is invalid or lacks permission', quota_err:'Quota exhausted or rate limited', network_err:'Could not reach the provider. Check your internet connection', file_too_large:'The file is too large for the selected engine',
+    cloud_processing:'Cloud processing', audio_sent:'Your audio/video file will be sent directly to', text_sent:'Your transcript text will be sent directly to', provider_charges:'Usage may consume a free quota or incur charges on your provider account.', agree_continue:'I understand, continue', choose_live_lang:'Live recording requires an explicit language; browser auto-detection is not supported.',
+    bad_base:'The Custom Endpoint address is invalid. Enter a complete HTTP or HTTPS URL.',
+    file_size:'Size', duration:'Duration', preparing_file:'Preparing file…', sending_provider:'Sending to provider and waiting for the result…', elapsed:'Elapsed', retry:'Try again', jump_back:'Back 10 seconds', jump_forward:'Forward 10 seconds', playback_speed:'Playback speed', timed_segments:'Timed segments — tap to jump to that point', words:'Words', characters:'Characters', undo_change:'Undo last change', restored:'Previous text restored', import_transcript:'Import transcript or subtitles', import_transcript_sub:'Open TXT, SRT or VTT, edit and save it locally without sending it to the cloud.', imported:'Transcript imported successfully', import_failed:'Could not read the transcript file', uploading_long:'Uploading long file to Gemini', processing_media:'Gemini is preparing the media file', direct_url:'Direct media file URL', direct_url_ph:'https://example.com/lesson.mp3', direct_url_note:'Up to 100MB. The URL must point directly to a file you may download; YouTube pages and protected courses are not direct links.', load_url:'Load URL', downloading:'Downloading file', bad_media_url:'The URL is not valid HTTPS or the site blocked access', download_too_large:'The linked file is larger than 100MB', screen_awake:'The screen will stay awake during transcription',
     orlive:'Or record live', startrec:'Start recording', stoprec:'Stop', recording:'Recording…',
     transcribe:'Transcribe', transcribing:'Transcribing… this may take a moment', engine:'Engine',
     result:'Transcript', editable:'You can edit the text before saving',
     copy:'Copy', copied:'Copied!', savehist:'Save to history', saved:'Saved',
+    updatehist:'Update transcript', draft:'Unsaved draft', continue_draft:'Continue draft', discard_draft:'Discard draft',
+    discard_draft_q:'Discard the current draft and start a new transcription?', replace_draft_q:'This action will replace the current draft. Continue?',
     exp_txt:'Export TXT', exp_srt:'Export SRT', exp_vtt:'Export VTT', share:'Share',
     improve:'Improve & summarize (AI)', cleanup:'Fix punctuation', summarize:'Summarize', translate:'Translate to English',
     ts_on:'Subtitles with timestamps', ts_hint:'Available on Gemini / OpenAI whisper-1',
@@ -226,7 +266,12 @@ const LANG = {
     howget:'How to get a key:', freevid:'Video: free Gemini key',
     refresh_models:'Refresh models (from your account)', model_list:'Official model list',
     username:'Username', username_ph:'Name / nickname', language:'Language', theme:'Theme',
-    palette:'Color palette', daynight:'Day / night', backup:'Backup (JSON)', restore:'Restore',
+    palette:'Color palette', daynight:'Day / night', backup:'Safe backup (JSON)', restore:'Restore',
+    backup_keys:'Full backup with keys', backup_keys_q:'The full backup contains your API keys as plain text. Keep it private and do not share it. Create a full backup?',
+    restore_bad:'The backup file is invalid or unsupported', restore_large:'The backup file is too large',
+    restore_found:'Backup contains', restore_items:'transcripts', restore_replace:'Replace all', restore_merge:'Merge transcripts',
+    restore_note:'An emergency backup of your current data will download automatically before restore.', restore_done:'Restore completed', restore_failed:'Restore failed; existing data was preserved',
+    save_failed:'Your data remains open, but the browser could not save it on this device.', backup_now:'Download backup now', storage_low:'Device storage is nearly full. Downloading a backup is recommended.',
     deleteall:'Delete all', notif:'Notifications', pdf:'Export PDF (print)',
     version:'Version', developer:'Developer', platform:'Platform', storage:'Storage',
     on_device:'On device only', license:'License', store:'AppNest store',
@@ -240,6 +285,12 @@ const LANG = {
     delall_q2:'Absolutely sure? All transcripts and settings will be erased.',
     restore_q:'Restore will replace all current data. Continue?',
     edit:'Edit', del:'Delete', ok:'OK', cancel:'Cancel', close:'Close',
+    search_tr:'Search title or text', newest:'Newest first', oldest:'Oldest first', sort_name:'By title', filter_all:'All', filter_file:'Files', filter_live:'Live recordings', no_results:'No matching transcripts', tr_title:'Transcript title', words:'words',
+    permissions_storage:'Permissions & storage', mic_app:'Microphone in app', mic_permission:'System permission', enabled:'Enabled', disabled:'Off', granted:'Granted', denied:'Blocked', prompt:'Not requested', unknown:'Unknown', request_mic:'Check / request permission', mic_disabled:'The microphone is disabled in app settings.', mic_help:'Permission is blocked by the browser or device. Open this site’s details in the browser, choose Permissions, and allow Microphone.', storage_local:'TimlulAI data', storage_browser:'App usage in browser', storage_quota:'Browser quota', persistent_storage:'Persistent storage', request_persistent:'Request persistent storage', supported:'Supported', unsupported:'Unsupported', installed:'Installed', browser_mode:'In browser', online_status:'Internet connection', folder_support:'Folder access', speech_support:'Speech recognition', transcripts_count:'Transcripts',
+    device_folder:'Device folder', connect_folder:'Choose and connect folder', reconnect_folder:'Renew folder permission', disconnect_folder:'Disconnect folder', folder_connected:'Connected', folder_not_connected:'Not connected', folder_disconnected_note:'Disconnecting does not delete files already saved on the device.', auto_save_txt:'Automatically save TXT', save_device:'Save to device', saved_device:'A copy was saved in the device folder', folder_needed:'Connect a folder in Settings first.', folder_error:'Could not write to the selected folder',
+    device_copy:'Device copy', delete_where:'Where should this transcript be deleted?', delete_app_only:'Delete from app only', delete_both:'Delete from app and device', deleted_app_only:'The transcript was deleted only from the app. The device-folder copy remains.', deleted_both:'The transcript and device copy were deleted', delete_device_failed:'Could not delete the device copy. The transcript remains in the app.', deleteall_external:'Copies saved in the device folder will not be deleted.',
+    save_audio_copy:'Also save the original audio file', audio_copy_note:'Off by default. Audio files may use substantial space and contain sensitive information.', folder_files_size:'Files in user folder', audio_saved:'The original audio was saved', audio_not_available:'The original audio is no longer available; only TXT was saved.',
+    update_ready:'A new version is ready', update_now:'Update now', offline_mode:'No internet connection — the app is running locally', install_app:'Install app', install_unavailable:'Install from the browser menu: Add to Home Screen.',
     nomic:'This browser does not support live recording. Try Chrome, or connect a key for files.',
     live_note:"Live recording sends audio to the browser's speech service.",
     disc:'This tool produces an estimated transcript and can be wrong. Verify important details. AI features send your audio/text to the provider you chose.',
@@ -270,16 +321,39 @@ function T(k){ const l=S.lang||'he'; return (LANG[l]&&LANG[l][k]) || LANG.en[k] 
 let S = load('settings', {
   username:'', lang:'he', palette:'goldblack', theme:'dark',
   ai:{ provider:'web', keys:{}, models:{}, base:'' , connected:{} },
-  wantTs:false,
+  wantTs:false, micEnabled:true, deviceSaveAuto:false, deviceSaveAudio:false,
 });
 if(!S.ai) S.ai={ provider:'web', keys:{}, models:{}, base:'', connected:{} };
+if(!S.ai.consent) S.ai.consent={};
+if(typeof S.micEnabled!=='boolean') S.micEnabled=true;
+if(typeof S.deviceSaveAuto!=='boolean') S.deviceSaveAuto=false;
+if(typeof S.deviceSaveAudio!=='boolean') S.deviceSaveAudio=false;
 // migrate deprecated Gemini model ids (gemini-1.x / 2.x are being shut down)
 if(S.ai.models && /gemini-(1|2)[.\-]/.test(S.ai.models.gem||'')){ delete S.ai.models.gem; save('settings',S); }
 let transcripts = load('transcripts', []);
-let current = null; // working transcript {text, segments, lang, at}
+let current = load('draft',null); // working transcript {text, segments, lang, at, dirty, savedId}
+if(!current||typeof current!=='object'||typeof current.text!=='string') current=null;
+else current.dirty=true;
 
-function persist(){ save('settings', S); }
-function persistTr(){ save('transcripts', transcripts); }
+let storageWarningOpen=false,storagePressureWarned=false,lastStorageCheck=0;
+function warnStorage(){
+  if(storageWarningOpen) return; storageWarningOpen=true;
+  modal(`<div class="h2" style="color:var(--danger)">${T('err')}</div>
+    <p>${T('save_failed')}</p><div class="row" style="margin-top:14px">
+    <button class="btn ghost" id="storageClose">${T('close')}</button>
+    <button class="btn gold" id="storageBackup">⬇️ ${T('backup_now')}</button></div>`);
+  document.getElementById('storageClose').onclick=()=>{storageWarningOpen=false;closeModal();};
+  document.getElementById('storageBackup').onclick=()=>{doBackup(false);storageWarningOpen=false;closeModal();};
+}
+async function checkStoragePressure(){
+  if(storagePressureWarned||!navigator.storage||!navigator.storage.estimate||Date.now()-lastStorageCheck<60000) return;
+  lastStorageCheck=Date.now();
+  try{ const e=await navigator.storage.estimate(); if(e.quota&&e.usage/e.quota>.85){storagePressureWarned=true;toast(T('storage_low'));} }catch(err){}
+}
+function persist(){ const ok=save('settings',S); if(!ok) warnStorage(); else checkStoragePressure(); return ok; }
+function persistTr(){ const ok=save('transcripts',transcripts); if(!ok) warnStorage(); else checkStoragePressure(); return ok; }
+function persistDraft(){ if(!current) return true; current.dirty=true; const ok=save('draft',current); if(!ok) warnStorage(); return ok; }
+function clearCurrent(){ current=null; if(!store.del(PFX+'draft')) warnStorage(); }
 
 /* ---------- theming ---------- */
 function applyTheme(){
@@ -314,14 +388,14 @@ function confirmBox(msg, onOk, okLabel){
     </div>`);
   document.getElementById('cok').addEventListener('click',()=>{ closeModal(); onOk(); });
 }
-function esc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(ts){ const d=new Date(ts); return d.toLocaleString(S.lang==='he'?'he-IL':undefined,{dateStyle:'short',timeStyle:'short'}); }
 
 /* ============================================================
    ROUTER / SCREENS
    ============================================================ */
 let screen='home';
-function go(s){ screen=s; render(); window.scrollTo(0,0); }
+function go(s){ if(activeController) cancelRequest(); if(recActive&&s!=='new'){try{recog&&recog.stop();}catch(e){}} screen=s; render(); window.scrollTo(0,0); }
 
 function header(withDot=true){
   const p=S.ai.provider; const conn = p==='web' ? true : !!(S.ai.connected&&S.ai.connected[p]);
@@ -350,6 +424,7 @@ function render(){
   app.innerHTML=`<div class="screen">${html}</div>`;
   applyTheme();
   if(screen==='new') wireNew();
+  if(screen==='mine') wireMine();
   if(screen==='ai') wireAI();
   if(screen==='settings') wireSettings();
 }
@@ -358,8 +433,12 @@ function render(){
 function viewHome(){
   const count = transcripts.length;
   return header()+`
+  ${current&&current.dirty&&current.text?`<div class="card">
+    <div class="h2">📝 ${T('draft')}</div><p class="hint">${esc(current.text.slice(0,160))}${current.text.length>160?'…':''}</p>
+    <div class="row"><button class="btn sm gold" onclick="go('new')">${T('continue_draft')}</button>
+    <button class="btn sm ghost" onclick="beginNew()">${T('discard_draft')}</button></div></div>`:''}
   <div class="tiles">
-    <button class="tile wide" onclick="go('new')"><div class="emo">🎙️</div><div class="lbl">${T('new')}</div></button>
+    <button class="tile wide" onclick="beginNew()"><div class="emo">🎙️</div><div class="lbl">${T('new')}</div></button>
     <button class="tile" onclick="go('mine')"><div class="emo">📄</div><div class="lbl">${T('mine')}${count?` · ${count}`:''}</div></button>
     <button class="tile" onclick="go('ai')"><div class="emo">🤖</div><div class="lbl">${T('engine')}</div></button>
     <button class="tile" onclick="go('settings')"><div class="emo">⚙️</div><div class="lbl">${T('settings')}</div></button>
@@ -368,17 +447,114 @@ function viewHome(){
   <p class="disc">${T('disc')}</p>
   <div class="badge">Powered by <b>AppNest</b> · © 2026</div>`;
 }
+function beginNew(){
+  const start=()=>{if(urlController)urlController.abort();if(pickedMediaUrl)URL.revokeObjectURL(pickedMediaUrl);pickedMediaUrl='';pickedFile=null;pickedDuration=0;resultUndoText=null;clearCurrent();go('new');};
+  if(current&&current.dirty&&current.text) confirmBox(T('discard_draft_q'),start,T('discard_draft'));
+  else start();
+}
 
 /* ---------- NEW TRANSCRIPTION ---------- */
 const LANGOPTS = [['he','עברית'],['en','English'],['ar','العربية'],['ru','Русский'],['es','Español'],
   ['fr','Français'],['de','Deutsch'],['auto','Auto / זיהוי אוטומטי']];
-let pickedFile=null; let recog=null; let recActive=false;
+let pickedFile=null,pickedMediaUrl='',pickedDuration=0,resultUndoText=null; let recog=null; let recActive=false;
+const GEM_INLINE_LIMIT=13*1048576;
+const FILE_LIMITS={gem:500*1048576,oai:25*1048576,custom:100*1048576};
+let activeController=null,activeTimer=null,abortReason='',urlController=null,wakeLock=null;
+let elapsedTimer=null,transcriptionStartedAt=0;
 function fileEngine(){ // which engine will handle a picked file
   const p=S.ai.provider;
   if(['gem','oai','custom'].includes(p)) return p;
   if(S.ai.keys.gem) return 'gem';
   if(S.ai.keys.oai) return 'oai';
   return null;
+}
+function fileLimitMB(engine){ return Math.round((FILE_LIMITS[engine]||0)/1048576); }
+function mediaTime(seconds){if(!Number.isFinite(seconds)||seconds<=0)return '—';const m=Math.floor(seconds/60),s=Math.floor(seconds%60);return `${m}:${String(s).padStart(2,'0')}`;}
+function pickedFileInfo(){if(!pickedFile)return '';return `✓ ${pickedFile.name} · ${T('file_size')}: ${(pickedFile.size/1048576).toFixed(1)} MB · ${T('duration')}: ${mediaTime(pickedDuration)}`;}
+function inspectPickedFile(file,info){
+  if(pickedMediaUrl)URL.revokeObjectURL(pickedMediaUrl);pickedMediaUrl=URL.createObjectURL(file);pickedDuration=0;if(info)info.textContent=pickedFileInfo();
+  const media=document.createElement((file.type||'').startsWith('video/')?'video':'audio');media.preload='metadata';media.src=pickedMediaUrl;
+  media.onloadedmetadata=()=>{pickedDuration=media.duration||0;if(info)info.textContent=pickedFileInfo();};media.onerror=()=>{};
+}
+function safeBaseUrl(value){
+  try{ const u=new URL(String(value||'').trim()); if(!['http:','https:'].includes(u.protocol)) throw new Error('protocol');
+    return u.href.replace(/\/$/,''); }catch(e){ throw new Error(T('bad_base')); }
+}
+function providerName(id){ return ({gem:'Google Gemini',oai:'OpenAI',claude:'Anthropic Claude',custom:T('prov_custom')})[id]||id; }
+function ensureProviderConsent(id,kind,resume){
+  S.ai.consent=S.ai.consent||{}; if(S.ai.consent[id]) return true;
+  const sent=kind==='audio'?T('audio_sent'):T('text_sent');
+  modal(`<div class="h2">☁️ ${T('cloud_processing')}</div>
+    <p>${sent} <b>${esc(providerName(id))}</b>.</p><p class="hint">${T('provider_charges')}</p>
+    <div class="row" style="margin-top:14px"><button class="btn ghost" onclick="closeModal()">${T('cancel')}</button>
+    <button class="btn gold" id="consentContinue">${T('agree_continue')}</button></div>`);
+  document.getElementById('consentContinue').onclick=()=>{ S.ai.consent[id]=true;
+    if(persist()){ closeModal(); resume(); } };
+  return false;
+}
+function fileTypeOK(file,engine){
+  const type=(file.type||'').toLowerCase(),name=(file.name||'').toLowerCase();
+  if(engine==='gem') return !type||type.startsWith('audio/')||type.startsWith('video/')||/\.(mp3|wav|m4a|aac|ogg|flac|mp4|mov|webm|mpeg|mpg)$/i.test(name);
+  return !type||type.startsWith('audio/')||/\.(mp3|mp4|mpeg|mpga|m4a|wav|webm|ogg|flac)$/i.test(name);
+}
+function beginRequest(timeoutMs=180000){
+  activeController=new AbortController(); abortReason='';
+  activeTimer=setTimeout(()=>{abortReason='timeout';activeController&&activeController.abort();},timeoutMs);
+  return activeController.signal;
+}
+function finishRequest(){ if(activeTimer) clearTimeout(activeTimer); activeTimer=null; activeController=null; }
+function cancelRequest(){ abortReason='cancel'; if(activeController) activeController.abort(); }
+async function acquireWakeLock(){if(!activeController||document.visibilityState!=='visible'||!('wakeLock' in navigator))return;try{const lock=await navigator.wakeLock.request('screen');if(!activeController){await lock.release();return;}wakeLock=lock;const e=document.getElementById('wakeStatus');if(e)e.textContent=`☀️ ${T('screen_awake')}`;lock.addEventListener('release',()=>{if(wakeLock===lock)wakeLock=null;});}catch(e){wakeLock=null;}}
+async function releaseWakeLock(){const lock=wakeLock;wakeLock=null;if(lock)try{await lock.release();}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&activeController&&!wakeLock)acquireWakeLock();});
+window.addEventListener('beforeunload',e=>{if(activeController||urlController){e.preventDefault();e.returnValue='';}});
+function setTranscriptionPhase(text){const e=document.getElementById('transcriptionPhase');if(e)e.textContent=text;}
+function startElapsedTimer(){transcriptionStartedAt=Date.now();if(elapsedTimer)clearInterval(elapsedTimer);elapsedTimer=setInterval(()=>{const e=document.getElementById('transcriptionElapsed');if(e)e.textContent=`${T('elapsed')}: ${Math.floor((Date.now()-transcriptionStartedAt)/1000)}s`;},1000);}
+function stopElapsedTimer(){if(elapsedTimer)clearInterval(elapsedTimer);elapsedTimer=null;}
+async function loadDirectMediaUrl(){
+  const input=document.getElementById('mediaUrl'),button=document.getElementById('loadUrl'),info=document.getElementById('fileInfo');
+  if(urlController){urlController.abort();return;}let url;try{url=new URL(input.value.trim());if(url.protocol!=='https:')throw new Error('protocol');}catch(e){toast(T('bad_media_url'));return;}
+  urlController=new AbortController();button.textContent=`✕ ${T('cancel')}`;const max=100*1048576;
+  try{const r=await fetch(url.href,{signal:urlController.signal,credentials:'omit',referrerPolicy:'no-referrer'});if(!r.ok)throw new Error('HTTP '+r.status);
+    const declared=Number(r.headers.get('content-length'))||0;if(declared>max)throw new Error('too large');const type=(r.headers.get('content-type')||'').split(';')[0];if(type==='text/html')throw new Error('not media');
+    const pathName=decodeURIComponent(url.pathname.split('/').pop()||'linked-media').replace(/[\\/:*?"<>|]/g,'_');let blob;
+    if(r.body&&r.body.getReader){const reader=r.body.getReader(),parts=[];let received=0;while(true){const x=await reader.read();if(x.done)break;received+=x.value.byteLength;if(received>max){reader.cancel();throw new Error('too large');}parts.push(x.value);if(info)info.textContent=`${T('downloading')}: ${declared?Math.round(received/declared*100)+'%':(received/1048576).toFixed(1)+' MB'}`;}blob=new Blob(parts,{type});}
+    else{blob=await r.blob();if(blob.size>max)throw new Error('too large');}
+    pickedFile=new File([blob],pathName||'linked-media',{type:type||blob.type});inspectPickedFile(pickedFile,info);input.value='';
+  }catch(e){if(e.name!=='AbortError')toast(/too large/.test(e.message)?T('download_too_large'):T('bad_media_url'));if(info&&!pickedFile)info.textContent='';}
+  finally{urlController=null;button.textContent=`🔗 ${T('load_url')}`;}
+}
+function subtitleSeconds(value){
+  const p=String(value||'').trim().replace(',','.').split(':').map(Number);if(p.some(n=>!Number.isFinite(n)))return NaN;
+  return p.length===3?p[0]*3600+p[1]*60+p[2]:p.length===2?p[0]*60+p[1]:NaN;
+}
+function parseTranscriptDocument(raw,name){
+  const source=String(raw||'').replace(/^\uFEFF/,'').replace(/\r/g,'');
+  if(/\.txt$/i.test(name))return {text:source.trim(),segments:null};
+  const blocks=source.replace(/^WEBVTT[^\n]*\n/i,'').split(/\n{2,}/),segments=[];
+  for(const block of blocks){const lines=block.split('\n');const ti=lines.findIndex(l=>l.includes('-->'));if(ti<0)continue;
+    const times=lines[ti].split('-->');const start=subtitleSeconds(times[0]),end=subtitleSeconds((times[1]||'').trim().split(/\s+/)[0]);
+    const text=lines.slice(ti+1).join(' ').replace(/<[^>]*>/g,'').trim();if(Number.isFinite(start)&&end>start&&text)segments.push({start,end,text});
+  }
+  if(!segments.length)throw new Error('no subtitle cues');return {text:segments.map(s=>s.text).join(' '),segments};
+}
+async function importTranscriptFile(file,force=false){
+  if(!file)return;if(!force&&current&&current.dirty&&current.text){confirmBox(T('replace_draft_q'),()=>importTranscriptFile(file,true),T('import_transcript'));return;}
+  try{if(file.size>5*1048576)throw new Error('too large');const parsed=parseTranscriptDocument(await file.text(),file.name||'');if(!parsed.text)throw new Error('empty');
+    if(pickedMediaUrl)URL.revokeObjectURL(pickedMediaUrl);pickedMediaUrl='';pickedFile=null;pickedDuration=0;resultUndoText=null;
+    current={text:parsed.text,segments:parsed.segments,lang:document.getElementById('srcLang')?.value||S.lang,at:Date.now(),live:false,name:file.name,dirty:true};persistDraft();
+    const wa=document.getElementById('workArea');wa.innerHTML=resultCard(current.text);wireResult();toast(T('imported'));
+  }catch(e){toast(T('import_failed'));}
+}
+function friendlyError(err){
+  const m=(err&&err.message||String(err)).toLowerCase();
+  if((err&&err.name==='AbortError')||/abort/.test(m)) return abortReason==='timeout'?T('timed_out'):T('cancelled');
+  if(/\b(401|403)\b|api.?key|unauthor|permission/.test(m)) return T('bad_key');
+  if(/\b429\b|quota|rate.?limit/.test(m)) return T('quota_err');
+  if(/\b413\b|too large|payload/.test(m)) return T('file_too_large');
+  if(/unsupported|mime|format|decode/.test(m)) return T('bad_type');
+  if(err instanceof TypeError||/failed to fetch|network/.test(m)) return T('network_err');
+  return err&&err.message?err.message:T('err');
 }
 function viewNew(){
   const eng=fileEngine();
@@ -396,13 +572,23 @@ function viewNew(){
   </div>
 
   <div class="card">
+    <div class="h2">📄 ${T('import_transcript')}</div>
+    <p class="sub">${T('import_transcript_sub')}</p>
+    <input type="file" id="transcriptIn" accept=".txt,.srt,.vtt,text/plain,text/vtt,application/x-subrip" style="padding:10px">
+  </div>
+
+  <div class="card">
     <div class="h2">📁 ${acceptVideo?T('pickfileV'):T('pickfile')}</div>
     <p class="sub">${T('pickfile_sub')}</p>
     <input type="file" id="fileIn" accept="${acceptVideo?'audio/*,video/*':'audio/*'}" style="padding:10px">
+    <label style="margin-top:12px">${T('direct_url')}</label>
+    <input type="url" id="mediaUrl" inputmode="url" placeholder="${T('direct_url_ph')}">
+    <button class="btn sm" id="loadUrl" style="margin-top:8px">🔗 ${T('load_url')}</button>
+    <p class="hint">${T('direct_url_note')}</p>
     <p class="hint" id="fileInfo"></p>
     <button class="btn primary" id="goBtn" style="font-size:17px;margin-top:12px">▶ ${T('transcribe')}</button>
     ${eng
-      ? `<p class="hint">${T('engine')}: <b style="color:var(--gold)">${engName}</b> · <a href="#" onclick="go('ai');return false" style="color:var(--gold)">${T('change')}</a></p>`
+      ? `<p class="hint">${T('engine')}: <b style="color:var(--gold)">${engName}</b> · ${T('file_limit')}: ${fileLimitMB(eng)} MB · <a href="#" onclick="go('ai');return false" style="color:var(--gold)">${T('change')}</a></p>`
       : `<p class="hint" style="color:var(--gold)">⚠️ ${T('file_needs_key')} <a href="#" onclick="go('ai');return false" style="color:var(--gold)">${T('ai_title')}</a></p>`}
   </div>
 
@@ -415,7 +601,6 @@ function viewNew(){
   <div id="workArea"></div>`;
 }
 function wireNew(){
-  pickedFile=null;
   const seg=document.getElementById('tsSeg');
   if(seg) seg.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
     S.wantTs = b.dataset.v==='1'; persist();
@@ -425,25 +610,34 @@ function wireNew(){
   if(fi) fi.addEventListener('change',()=>{
     pickedFile = fi.files[0]||null;
     const info=document.getElementById('fileInfo');
-    if(pickedFile){ const mb=(pickedFile.size/1048576).toFixed(1);
-      info.textContent = `✓ ${pickedFile.name} · ${mb} MB`; }
+    if(pickedFile)inspectPickedFile(pickedFile,info);else if(info)info.textContent='';
   });
+  const info=document.getElementById('fileInfo');if(info&&pickedFile)info.textContent=pickedFileInfo();
+  const loadUrl=document.getElementById('loadUrl');if(loadUrl)loadUrl.addEventListener('click',loadDirectMediaUrl);
+  const transcriptIn=document.getElementById('transcriptIn');if(transcriptIn)transcriptIn.addEventListener('change',()=>{const file=transcriptIn.files[0];transcriptIn.value='';importTranscriptFile(file);});
   const rb=document.getElementById('recBtn');
-  if(rb) rb.addEventListener('click', toggleLive);
-  document.getElementById('goBtn').addEventListener('click', runTranscription);
+  if(rb) rb.addEventListener('click',()=>toggleLive());
+  document.getElementById('goBtn').addEventListener('click',()=>runTranscription());
+  if(current&&current.text){
+    const src=document.getElementById('srcLang'); if(src&&LANGOPTS.some(o=>o[0]===current.lang)) src.value=current.lang;
+    const wa=document.getElementById('workArea'); wa.innerHTML=resultCard(current.text); wireResult();
+  }
 }
 
 /* ---------- live mic (Web Speech) ---------- */
-function toggleLive(){
+function toggleLive(force=false){
+  if(S.micEnabled===false){ toast(T('mic_disabled')); go('settings'); return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){ toast(T('nomic')); return; }
   const btn=document.getElementById('recBtn');
   if(recActive){ recog && recog.stop(); return; }
-  recog = new SR();
+  if(!force&&current&&current.dirty&&current.text){ confirmBox(T('replace_draft_q'),()=>{clearCurrent();toggleLive(true);},T('startrec')); return; }
   const srcSel=document.getElementById('srcLang'); const lc=srcSel?srcSel.value:'he';
-  recog.lang = lc==='he'?'he-IL':lc==='ar'?'ar-SA':lc==='ru'?'ru-RU':lc==='es'?'es-ES':lc==='auto'?'he-IL':lc;
+  if(lc==='auto'){ toast(T('choose_live_lang')); return; }
+  recog = new SR();
+  recog.lang = lc==='he'?'he-IL':lc==='ar'?'ar-SA':lc==='ru'?'ru-RU':lc==='es'?'es-ES':lc;
   recog.continuous=true; recog.interimResults=true;
-  let finalText = current&&current.live ? (current.text+' ') : '';
+  let finalText = '';
   recog.onresult=(e)=>{
     let interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
@@ -459,47 +653,66 @@ function toggleLive(){
   btn.classList.remove('gold'); btn.classList.add('danger');
 }
 function showLiveResult(final, interim){
-  current={ text:final.trim(), segments:null, lang:document.getElementById('srcLang').value, at:Date.now(), live:true };
+  current={ text:final.trim(), segments:null, lang:document.getElementById('srcLang').value, at:Date.now(), live:true, dirty:true };
+  persistDraft();
   const wa=document.getElementById('workArea');
   wa.innerHTML = resultCard((final+interim).trim());
   wireResult();
 }
 
 /* ---------- run file transcription ---------- */
-async function runTranscription(){
+async function runTranscription(force=false){
   const srcLang=document.getElementById('srcLang').value;
   const wa=document.getElementById('workArea');
+  if(activeController){ toast(T('transcribing')); return; }
   if(!pickedFile){ toast(T('no_file')); return; }
+  if(!force&&current&&current.dirty&&current.text){ confirmBox(T('replace_draft_q'),()=>runTranscription(true),T('transcribe')); return; }
   const p=fileEngine();
   if(!p){ toast(T('file_needs_key')); go('ai'); return; }
-  if(p==='oai' && pickedFile.size>25*1048576){ toast(T('too_big')); return; }
+  if(!fileTypeOK(pickedFile,p)){ toast(T('bad_type')); return; }
+  if(FILE_LIMITS[p]&&pickedFile.size>FILE_LIMITS[p]){ toast(T('file_too_large')+` (${fileLimitMB(p)} MB)`); return; }
   if(!S.ai.keys[p] && p!=='custom'){ toast(T('need_key')); go('ai'); return; }
+  if(!ensureProviderConsent(p,'audio',()=>runTranscription(true))) return;
 
-  wa.innerHTML=`<div class="card"><div class="h2">${T('transcribing')}</div><div class="progress"><i></i></div></div>`;
+  const signal=beginRequest(p==='gem'&&pickedFile.size>GEM_INLINE_LIMIT?1200000:180000);
+  const goButton=document.getElementById('goBtn'); if(goButton) goButton.disabled=true;
+  wa.innerHTML=`<div class="card"><div class="h2">${T('transcribing')}</div><p class="hint" id="transcriptionPhase">${T('preparing_file')}</p><p class="hint" id="transcriptionElapsed">${T('elapsed')}: 0s</p><p class="hint" id="wakeStatus"></p><div class="progress"><i></i></div>
+    <button class="btn sm danger" id="cancelTrans" style="margin-top:12px">✕ ${T('cancel_job')}</button></div>`;
+  startElapsedTimer();
+  acquireWakeLock();
+  document.getElementById('cancelTrans').onclick=cancelRequest;
   try{
     let res;
-    if(p==='gem') res=await transcribeGemini(pickedFile, srcLang, S.wantTs);
-    else if(p==='oai') res=await transcribeOpenAI(pickedFile, srcLang, S.wantTs);
-    else if(p==='custom') res=await transcribeCustom(pickedFile, srcLang);
-    current={ text:res.text.trim(), segments:res.segments||null, lang:srcLang, at:Date.now(), live:false, name:pickedFile.name };
+    if(p==='gem') res=await transcribeGemini(pickedFile, srcLang, S.wantTs,signal);
+    else if(p==='oai') res=await transcribeOpenAI(pickedFile, srcLang, S.wantTs,signal);
+    else if(p==='custom') res=await transcribeCustom(pickedFile, srcLang,signal);
+    resultUndoText=null;
+    current={ text:res.text.trim(), segments:res.segments||null, lang:srcLang, at:Date.now(), live:false, name:pickedFile.name, dirty:true };
+    persistDraft();
     wa.innerHTML = resultCard(current.text);
     wireResult();
   }catch(err){
     wa.innerHTML=`<div class="card"><div class="h2" style="color:var(--danger)">${T('err')}</div>
-      <p class="hint">${esc(err.message||String(err))}</p></div>`;
-  }
+      <p class="hint">${esc(friendlyError(err))}</p><button class="btn sm" id="retryTrans">↻ ${T('retry')}</button></div>`;
+    document.getElementById('retryTrans').onclick=()=>runTranscription(true);
+  }finally{ stopElapsedTimer();finishRequest();releaseWakeLock(); const goButton=document.getElementById('goBtn'); if(goButton) goButton.disabled=false; }
 }
 
 /* ---------- result card ---------- */
 function resultCard(text){
   const canImprove = S.ai.provider!=='web' || S.ai.keys.gem||S.ai.keys.oai||S.ai.keys.claude;
+  const timedSegments=current&&Array.isArray(current.segments)?current.segments.filter(s=>Number.isFinite(Number(s.start))&&Number(s.end)>Number(s.start)):[];
   return `<div class="card">
     <div class="h2">${T('result')}</div>
     <p class="sub">${T('editable')}</p>
+    ${pickedMediaUrl?`<${pickedFile&&(pickedFile.type||'').startsWith('video/')?'video':'audio'} id="sourceMedia" controls preload="metadata" src="${esc(pickedMediaUrl)}"></${pickedFile&&(pickedFile.type||'').startsWith('video/')?'video':'audio'}>
+      <div class="row" style="margin:8px 0"><button class="btn sm" id="mediaBack">↶ ${T('jump_back')}</button><button class="btn sm" id="mediaForward">↷ ${T('jump_forward')}</button><label style="margin:0">${T('playback_speed')} <select id="playbackSpeed" style="width:auto;margin:0"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>`:''}
+    ${timedSegments.length?`<p class="hint">${T('timed_segments')}</p><div class="segment-list" id="segmentList">${timedSegments.map((s,i)=>`<button type="button" class="segment" data-segment="${i}" data-start="${Number(s.start)||0}" data-end="${Number(s.end)||0}"><span class="segment-time">${mediaTime(Number(s.start)||0)}</span><span class="segment-text">${esc(s.text||'')}</span></button>`).join('')}</div>`:''}
     <textarea id="resText">${esc(text)}</textarea>
+    <div class="row" style="justify-content:space-between;margin-top:6px"><span class="hint" id="textStats"></span><button class="btn sm ghost" id="btnUndo" ${resultUndoText===null?'disabled style="opacity:.45"':''}>↶ ${T('undo_change')}</button></div>
     <div class="row" style="margin-top:10px">
       <button class="btn sm" id="btnCopy">📋 ${T('copy')}</button>
-      <button class="btn sm" id="btnSave">💾 ${T('savehist')}</button>
+      <button class="btn sm" id="btnSave">💾 ${current&&current.savedId?T('updatehist'):T('savehist')}</button>
       <button class="btn sm" id="btnShare">📤 ${T('share')}</button>
     </div>
     <div class="row" style="margin-top:8px">
@@ -516,11 +729,33 @@ function resultCard(text){
 }
 function wireResult(){
   const ta=document.getElementById('resText');
+  const stats=document.getElementById('textStats'),undo=document.getElementById('btnUndo');
+  const updateStats=()=>{const value=ta.value.trim();const words=value?value.split(/\s+/u).length:0;stats.textContent=`${T('words')}: ${words} · ${T('characters')}: ${ta.value.length}`;};
+  updateStats();
+  undo.onclick=()=>{if(resultUndoText===null)return;ta.value=resultUndoText;resultUndoText=null;undo.disabled=true;undo.style.opacity='.45';ta.dispatchEvent(new Event('input'));toast(T('restored'));};
+  const media=document.getElementById('sourceMedia'),back=document.getElementById('mediaBack'),forward=document.getElementById('mediaForward'),speed=document.getElementById('playbackSpeed');
+  if(media&&back)back.onclick=()=>{media.currentTime=Math.max(0,media.currentTime-10);};if(media&&forward)forward.onclick=()=>{media.currentTime=Math.min(media.duration||Infinity,media.currentTime+10);};
+  if(media&&speed)speed.onchange=()=>{media.playbackRate=Number(speed.value)||1;};
+  const segmentButtons=[...document.querySelectorAll('[data-segment]')];
+  if(media&&segmentButtons.length){
+    segmentButtons.forEach(btn=>btn.onclick=()=>{media.currentTime=Number(btn.dataset.start)||0;media.play().catch(()=>{});});
+    media.addEventListener('timeupdate',()=>{const now=media.currentTime;let active=null;segmentButtons.forEach(btn=>{const on=now>=Number(btn.dataset.start)&&now<(Number(btn.dataset.end)||Infinity);btn.classList.toggle('active',on);if(on)active=btn;});if(active&&active!==wireResult.activeSegment){wireResult.activeSegment=active;active.scrollIntoView({block:'nearest'});}});
+  }
+  let draftTimer;
+  ta.addEventListener('input',()=>{ updateStats();clearTimeout(draftTimer); current.text=ta.value; current.dirty=true;
+    draftTimer=setTimeout(persistDraft,350); });
   document.getElementById('btnCopy').onclick=()=>{ navigator.clipboard.writeText(ta.value); toast(T('copied')); };
   document.getElementById('btnSave').onclick=()=>{
-    current.text=ta.value;
-    transcripts.unshift({...current, id:Date.now()+''+Math.random().toString(36).slice(2,6)});
-    persistTr(); toast(T('saved'));
+    current.text=ta.value; current.dirty=true;
+    let item=current.savedId?transcripts.find(t=>t.id===current.savedId):null;
+    if(item){ Object.assign(item,{text:current.text,segments:current.segments,lang:current.lang,at:current.at,live:current.live,name:current.name}); }
+    else { const id=Date.now()+''+Math.random().toString(36).slice(2,6); current.savedId=id;
+      item={...current,id}; delete item.savedId; delete item.dirty; transcripts.unshift(item); }
+    if(persistTr()){
+      current.dirty=false; if(!store.del(PFX+'draft')) warnStorage();
+      document.getElementById('btnSave').innerHTML=`💾 ${T('updatehist')}`; toast(T('saved'));
+      if(S.deviceSaveAuto) writeTranscriptToDevice(item,false,pickedFile);
+    }else persistDraft();
   };
   document.getElementById('btnShare').onclick=()=>{
     const name=S.username?`(${S.username}) `:'';
@@ -547,11 +782,11 @@ function geminiCandidates(){
   const first=(S.ai.models&&S.ai.models.gem)||GEM_DEFAULT;
   return [...new Set([first, ...GEM_FALLBACKS])];
 }
-async function geminiGenerate(key, body){
+async function geminiGenerate(key, body,signal){
   let lastErr;
   for(const model of geminiCandidates()){
-    const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body),signal});
     if(r.ok){
       const data=await r.json();
       return (data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('\n').trim();
@@ -563,27 +798,49 @@ async function geminiGenerate(key, body){
   }
   throw lastErr||new Error('Gemini: no available model');
 }
-async function transcribeGemini(file, lang, wantTs){
+async function transcribeGemini(file, lang, wantTs,signal){
   const key=S.ai.keys.gem;
-  const b64=await fileToBase64(file);
   const langName = lang==='auto'?'the spoken language':(LANGOPTS.find(o=>o[0]===lang)||[,lang])[1];
   const prompt = wantTs
     ? `Transcribe this audio verbatim in ${langName}. Return ONLY a JSON array of segments, no markdown, each like {"start":<seconds>,"end":<seconds>,"text":"..."}. Keep segments short (one sentence).`
     : `Transcribe this audio verbatim in ${langName}. Return ONLY the transcript text, no comments.`;
-  const body={ contents:[{ parts:[ {text:prompt}, {inline_data:{mime_type:file.type||'audio/mpeg', data:b64}} ] }] };
-  const txt=await geminiGenerate(key, body);
-  if(wantTs){ const segs=parseSegments(txt); return { text: segs.map(s=>s.text).join(' '), segments:segs }; }
-  return { text:txt, segments:null };
+  let uploaded=null,part;
+  try{
+    if(file.size>GEM_INLINE_LIMIT){uploaded=await uploadGeminiFile(file,key,signal);part={file_data:{mime_type:uploaded.mimeType,file_uri:uploaded.uri}};}
+    else{const b64=await fileToBase64(file);part={inline_data:{mime_type:file.type||'audio/mpeg',data:b64}};}
+    setTranscriptionPhase(T('sending_provider'));
+    const body={contents:[{parts:[{text:prompt},part]}]};
+    const txt=await geminiGenerate(key,body,signal);
+    if(wantTs){const segs=parseSegments(txt);return {text:segs.map(s=>s.text).join(' '),segments:segs};}
+    return {text:txt,segments:null};
+  }finally{if(uploaded&&uploaded.name)fetch(`https://generativelanguage.googleapis.com/v1beta/${uploaded.name}`,{method:'DELETE',headers:{'x-goog-api-key':key}}).catch(()=>{});}
 }
 
-async function transcribeOpenAI(file, lang, wantTs){
+function uploadGeminiBytes(url,file,signal){return new Promise((resolve,reject)=>{
+  const x=new XMLHttpRequest();x.open('POST',url);x.setRequestHeader('X-Goog-Upload-Offset','0');x.setRequestHeader('X-Goog-Upload-Command','upload, finalize');
+  x.upload.onprogress=e=>{if(e.lengthComputable)setTranscriptionPhase(`${T('uploading_long')}: ${Math.round(e.loaded/e.total*100)}%`);};
+  x.onload=()=>{if(x.status>=200&&x.status<300){try{resolve(JSON.parse(x.responseText));}catch(e){reject(e);}}else reject(new Error('Gemini upload '+x.status));};x.onerror=()=>reject(new Error('Gemini upload network'));x.onabort=()=>reject(new DOMException('Aborted','AbortError'));
+  const abort=()=>x.abort();signal.addEventListener('abort',abort,{once:true});x.onloadend=()=>signal.removeEventListener('abort',abort);x.send(file);
+});}
+function waitSignal(ms,signal){return new Promise((resolve,reject)=>{const abort=()=>{clearTimeout(id);reject(new DOMException('Aborted','AbortError'));};const id=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);signal.addEventListener('abort',abort,{once:true});});}
+async function uploadGeminiFile(file,key,signal){
+  setTranscriptionPhase(`${T('uploading_long')}: 0%`);const mime=file.type||'audio/mpeg';
+  const start=await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files',{method:'POST',signal,headers:{'x-goog-api-key':key,'X-Goog-Upload-Protocol':'resumable','X-Goog-Upload-Command':'start','X-Goog-Upload-Header-Content-Length':String(file.size),'X-Goog-Upload-Header-Content-Type':mime,'Content-Type':'application/json'},body:JSON.stringify({file:{display_name:file.name||'TimlulAI media'}})});
+  if(!start.ok)throw new Error('Gemini upload start '+start.status);const url=start.headers.get('x-goog-upload-url');if(!url)throw new Error('Gemini upload URL missing');
+  const result=await uploadGeminiBytes(url,file,signal);let resource=result.file;if(!resource||!resource.name||!resource.uri)throw new Error('Gemini upload response');
+  for(let i=0;i<150&&resource.state&&resource.state!=='ACTIVE';i++){if(resource.state==='FAILED')throw new Error('Gemini file processing failed');setTranscriptionPhase(T('processing_media'));await waitSignal(2000,signal);const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/${resource.name}`,{signal,headers:{'x-goog-api-key':key}});if(!r.ok)throw new Error('Gemini file status '+r.status);resource=await r.json();}
+  if(resource.state&&resource.state!=='ACTIVE')throw new Error('Gemini file processing timeout');return {name:resource.name,uri:resource.uri,mimeType:resource.mime_type||mime};
+}
+
+async function transcribeOpenAI(file, lang, wantTs,signal){
   const key=S.ai.keys.oai;
   const model = wantTs ? 'whisper-1' : (S.ai.models.oai||'gpt-transcribe');
   const fd=new FormData(); fd.append('file', file); fd.append('model', model);
   if(lang && lang!=='auto') fd.append('language', lang);
   fd.append('response_format', wantTs ? 'verbose_json' : 'json');
+  setTranscriptionPhase(T('sending_provider'));
   const r=await fetch('https://api.openai.com/v1/audio/transcriptions',{
-    method:'POST', headers:{'Authorization':'Bearer '+key}, body:fd });
+    method:'POST', headers:{'Authorization':'Bearer '+key}, body:fd, signal });
   if(!r.ok){ throw new Error('OpenAI '+r.status+': '+(await r.text()).slice(0,200)); }
   const data=await r.json();
   if(wantTs && data.segments){
@@ -593,13 +850,14 @@ async function transcribeOpenAI(file, lang, wantTs){
   return { text:data.text||'', segments:null };
 }
 
-async function transcribeCustom(file, lang){
-  const base=(S.ai.base||'http://localhost:11434').replace(/\/$/,'');
+async function transcribeCustom(file, lang,signal){
+  const base=safeBaseUrl(S.ai.base||'http://localhost:11434');
   const key=S.ai.keys.custom||'';
   const fd=new FormData(); fd.append('file', file); fd.append('model', S.ai.models.custom||'whisper-1');
   if(lang&&lang!=='auto') fd.append('language', lang);
   const h={}; if(key) h['Authorization']='Bearer '+key;
-  const r=await fetch(base+'/v1/audio/transcriptions',{method:'POST',headers:h,body:fd});
+  setTranscriptionPhase(T('sending_provider'));
+  const r=await fetch(base+'/v1/audio/transcriptions',{method:'POST',headers:h,body:fd,signal});
   if(!r.ok){ throw new Error('Custom '+r.status+': '+(await r.text()).slice(0,200)); }
   const data=await r.json();
   return { text:data.text||'', segments:null };
@@ -617,6 +875,7 @@ async function assist(kind, ta){
   const text=ta.value.trim(); if(!text){ return; }
   const prov = S.ai.keys.claude?'claude': S.ai.keys.oai?'oai': S.ai.keys.gem?'gem': null;
   if(!prov){ toast(T('need_key')); return; }
+  if(!ensureProviderConsent(prov,'text',()=>assist(kind,ta))) return;
   const prompts={
     cleanup:'Fix punctuation, capitalization and paragraph breaks in this transcript. Keep the SAME language and wording. Return only the corrected text:\n\n',
     summarize:'Summarize the key points of this transcript in the same language, as short bullet points. Return only the summary:\n\n',
@@ -626,10 +885,13 @@ async function assist(kind, ta){
   toast(T('transcribing'));
   try{
     const out=await callChat(prov, prompts[kind]+text);
+    resultUndoText=ta.value;
     if(kind==='summarize'||kind==='translate'){
       ta.value = ta.value + '\n\n— — —\n' + out.trim();
     } else { ta.value = out.trim(); }
-    if(current) current.text=ta.value;
+    const undo=document.getElementById('btnUndo');if(undo){undo.disabled=false;undo.style.opacity='';}
+    ta.dispatchEvent(new Event('input'));
+    if(current){ current.text=ta.value; current.dirty=true; persistDraft(); }
   }catch(err){ toast(T('err')); }
 }
 async function callChat(prov, userText){
@@ -664,25 +926,134 @@ function download(name, content, type){ const b=new Blob([content],{type}); cons
   const a=document.createElement('a'); a.href=u; a.download=(S.username?S.username+'-':'')+name; a.click();
   setTimeout(()=>URL.revokeObjectURL(u),1000); }
 
+/* ---------- USER-SELECTED DEVICE FOLDER ---------- */
+let deviceFolderHandle=null,deviceFolderPermission='none';
+function folderDb(){ return new Promise((resolve,reject)=>{ if(!window.indexedDB)return reject(new Error('unsupported'));
+  const r=indexedDB.open('timlulai_handles',1);r.onupgradeneeded=()=>r.result.createObjectStore('handles');
+  r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error); }); }
+async function storeFolderHandle(handle){const db=await folderDb();return new Promise((res,rej)=>{const tx=db.transaction('handles','readwrite');tx.objectStore('handles').put(handle,'deviceFolder');tx.oncomplete=()=>{db.close();res();};tx.onerror=()=>rej(tx.error);});}
+async function readFolderHandle(){try{const db=await folderDb();return await new Promise((res,rej)=>{const tx=db.transaction('handles','readonly'),r=tx.objectStore('handles').get('deviceFolder');r.onsuccess=()=>{db.close();res(r.result||null);};r.onerror=()=>rej(r.error);});}catch(e){return null;}}
+async function removeFolderHandle(){try{const db=await folderDb();await new Promise((res,rej)=>{const tx=db.transaction('handles','readwrite');tx.objectStore('handles').delete('deviceFolder');tx.oncomplete=()=>{db.close();res();};tx.onerror=()=>rej(tx.error);});}catch(e){}}
+function safeFolderPart(v,fallback){const s=String(v||'').trim().replace(/[\\/:*?"<>|]/g,'-').replace(/[. ]+$/,'').slice(0,80);return s||fallback;}
+async function folderPermission(handle,request=false){
+  if(!handle)return 'none';try{let state=await handle.queryPermission({mode:'readwrite'});if(state==='prompt'&&request)state=await handle.requestPermission({mode:'readwrite'});return state;}catch(e){return 'denied';}
+}
+async function getAppDeviceFolder(request=false,userFolderName,create=true){
+  if(!deviceFolderHandle)return null;deviceFolderPermission=await folderPermission(deviceFolderHandle,request);if(deviceFolderPermission!=='granted')return null;
+  const root=await deviceFolderHandle.getDirectoryHandle('TimlulAI',{create});
+  return await root.getDirectoryHandle(userFolderName||safeFolderPart(S.username,S.lang==='he'?'משתמש':'User'),{create});
+}
+async function connectDeviceFolder(){
+  if(!window.showDirectoryPicker){toast(T('unsupported'));return;}
+  try{const h=await window.showDirectoryPicker({mode:'readwrite'});deviceFolderHandle=h;deviceFolderPermission=await folderPermission(h,true);
+    if(deviceFolderPermission!=='granted')throw new Error('denied');await storeFolderHandle(h);await getAppDeviceFolder(false);toast(T('folder_connected'));refreshDeviceCenter();}
+  catch(e){if(e&&e.name!=='AbortError')toast(T('folder_error'));}
+}
+async function reconnectDeviceFolder(){if(!deviceFolderHandle){connectDeviceFolder();return;}deviceFolderPermission=await folderPermission(deviceFolderHandle,true);if(deviceFolderPermission==='granted')toast(T('folder_connected'));else toast(T('denied'));refreshDeviceCenter();}
+async function disconnectDeviceFolder(){await removeFolderHandle();deviceFolderHandle=null;deviceFolderPermission='none';toast(T('folder_disconnected_note'));refreshDeviceCenter();}
+async function writeTranscriptToDevice(t,request=false,sourceFile=null){
+  try{const folder=safeFolderPart(S.username,S.lang==='he'?'משתמש':'User'),dir=await getAppDeviceFolder(request,folder);if(!dir){toast(T('folder_needed'));return false;}
+    const previous=t.deviceFile?{...t.deviceFile}:null;
+    const base=safeFolderPart(transcriptTitle(t),'transcript'),suffix=String(t.id||Date.now()).slice(-6),fileName=`${base}-${suffix}.txt`;
+    const fh=await dir.getFileHandle(fileName,{create:true}),w=await fh.createWritable();await w.write(t.text||'');await w.close();
+    let audioName=t.deviceFile&&t.deviceFile.audioName||'',audioBytes=t.deviceFile&&t.deviceFile.audioBytes||0;
+    if(S.deviceSaveAudio&&sourceFile){const ext=(String(sourceFile.name||'').match(/\.[a-z0-9]{1,8}$/i)||['.audio'])[0];audioName=`${base}-${suffix}-audio${ext}`;
+      const ah=await dir.getFileHandle(audioName,{create:true}),aw=await ah.createWritable();await aw.write(sourceFile);await aw.close();audioBytes=sourceFile.size||0;}
+    if(previous&&previous.folder===folder){for(const old of [previous.name!==fileName?previous.name:'',previous.audioName&&previous.audioName!==audioName?previous.audioName:''].filter(Boolean)){try{await dir.removeEntry(old);}catch(e){}}}
+    t.deviceFile={name:fileName,audioName,folder,savedAt:Date.now(),textBytes:new Blob([t.text||'']).size,audioBytes};persistTr();
+    toast(S.deviceSaveAudio&&sourceFile?T('audio_saved'):S.deviceSaveAudio&&!audioName?T('audio_not_available'):T('saved_device'));return true;
+  }catch(e){toast(T('folder_error'));return false;}
+}
+function saveTrToDevice(id){const t=findTr(id);if(t)writeTranscriptToDevice(t,true);}
+async function deleteDeviceCopy(t){
+  if(!t.deviceFile||!t.deviceFile.name)return true;
+  try{const folder=t.deviceFile.folder||safeFolderPart(S.username,S.lang==='he'?'משתמש':'User');const dir=await getAppDeviceFolder(true,folder,false);if(!dir)return false;
+    for(const name of [t.deviceFile.name,t.deviceFile.audioName].filter(Boolean)){try{await dir.removeEntry(name);}catch(e){if(!(e&&e.name==='NotFoundError'))throw e;}}return true;
+  }catch(e){return !!(e&&e.name==='NotFoundError'&&t.deviceFile.folder);}
+}
+async function deviceFolderSize(){
+  try{const folder=safeFolderPart(S.username,S.lang==='he'?'משתמש':'User'),dir=await getAppDeviceFolder(false,folder,false);if(!dir)return NaN;let total=0;
+    for await(const entry of dir.values()){if(entry.kind==='file'){const f=await entry.getFile();total+=f.size||0;}}return total;
+  }catch(e){return NaN;}
+}
+
 /* ---------- MY TRANSCRIPTS ---------- */
+const mineState={q:'',sort:'new',type:'all',lang:'all'};
+function transcriptTitle(t){
+  if(t.title) return t.title;
+  if(t.name) return t.name.replace(/\.[^.]+$/,'');
+  return (S.lang==='he'?'תמלול ':'Transcript ')+fmtDate(t.at);
+}
+function transcriptWords(t){ return (t.text||'').trim()?((t.text||'').trim().match(/\S+/g)||[]).length:0; }
+function filteredTranscripts(){
+  const q=mineState.q.trim().toLocaleLowerCase();
+  const list=transcripts.filter(t=>(mineState.type==='all'||(mineState.type==='live'&&t.live)||(mineState.type==='file'&&!t.live))
+    &&(mineState.lang==='all'||t.lang===mineState.lang)
+    &&(!q||(transcriptTitle(t)+' '+(t.text||'')).toLocaleLowerCase().includes(q)));
+  return list.sort((a,b)=>mineState.sort==='old'?(a.at||0)-(b.at||0):mineState.sort==='name'
+    ?transcriptTitle(a).localeCompare(transcriptTitle(b),S.lang):(b.at||0)-(a.at||0));
+}
+function mineListHtml(){
+  const list=filteredTranscripts();
+  if(!list.length) return `<div class="card center muted">${T('no_results')}</div>`;
+  return list.map(t=>`<div class="tr">
+    <div class="tr-title">${esc(transcriptTitle(t))}</div>
+    <div class="meta"><span>${fmtDate(t.at)} · ${esc(t.lang||'—')} · ${transcriptWords(t)} ${T('words')}${t.deviceFile?' · 📁 '+T('device_copy'):''}${t.deviceFile&&t.deviceFile.audioName?' · 🎧':''}</span><span>${t.live?'🎙️':'📄'}</span></div>
+    <div class="snip">${esc(t.text.slice(0,180))}${t.text.length>180?'…':''}</div>
+    <div class="acts">
+      <button class="btn sm" data-act="open" data-id="${esc(t.id)}">👁️ ${T('edit')}</button>
+      <button class="btn sm" data-act="copy" data-id="${esc(t.id)}">📋 ${T('copy')}</button>
+      <button class="btn sm" data-act="export" data-id="${esc(t.id)}">⬇️ TXT</button>
+      <button class="btn sm" data-act="device" data-id="${esc(t.id)}">📁 ${T('save_device')}</button>
+      <button class="btn sm danger" data-act="delete" data-id="${esc(t.id)}">🗑️ ${T('del')}</button>
+    </div></div>`).join('');
+}
 function viewMine(){
   if(!transcripts.length) return backBtn()+`<div class="card center"><p class="muted">${T('empty_hist')}</p>
-    <button class="btn primary" onclick="go('new')">🎙️ ${T('new')}</button></div>`;
-  return backBtn()+`<div class="h2" style="margin-bottom:10px">${T('mine')} · ${transcripts.length}</div>`+
-    transcripts.map(t=>`<div class="tr">
-      <div class="meta"><span>${fmtDate(t.at)}${t.name?' · '+esc(t.name):''}</span><span>${t.live?'🎙️':'📄'}</span></div>
-      <div class="snip">${esc(t.text.slice(0,180))}${t.text.length>180?'…':''}</div>
-      <div class="acts">
-        <button class="btn sm" onclick="openTr('${t.id}')">👁️ ${T('edit')}</button>
-        <button class="btn sm" onclick="copyTr('${t.id}')">📋 ${T('copy')}</button>
-        <button class="btn sm danger" onclick="delTr('${t.id}')">🗑️ ${T('del')}</button>
-      </div></div>`).join('');
+    <button class="btn primary" onclick="beginNew()">🎙️ ${T('new')}</button></div>`;
+  const langs=[...new Set(transcripts.map(t=>t.lang).filter(Boolean))];
+  return backBtn()+`<div class="h2" style="margin-bottom:10px">${T('mine')} · ${transcripts.length}</div>
+    <div class="library-controls">
+      <input class="search" id="mineSearch" value="${esc(mineState.q)}" placeholder="🔎 ${T('search_tr')}">
+      <select id="mineSort"><option value="new">${T('newest')}</option><option value="old">${T('oldest')}</option><option value="name">${T('sort_name')}</option></select>
+      <select id="mineType"><option value="all">${T('filter_all')}</option><option value="file">${T('filter_file')}</option><option value="live">${T('filter_live')}</option></select>
+      <select id="mineLang"><option value="all">${T('filter_all')}</option>${langs.map(l=>`<option value="${esc(l)}">${esc(l)}</option>`).join('')}</select>
+    </div><div id="mineList">${mineListHtml()}</div>`;
+}
+function wireMineActions(){
+  const root=document.getElementById('mineList'); if(!root) return;
+  root.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>{ const id=b.dataset.id;
+    if(b.dataset.act==='open') openTr(id); else if(b.dataset.act==='copy') copyTr(id);
+    else if(b.dataset.act==='export') exportTr(id); else if(b.dataset.act==='device') saveTrToDevice(id); else if(b.dataset.act==='delete') delTr(id); });
+}
+function renderMineList(){ const root=document.getElementById('mineList'); if(root){root.innerHTML=mineListHtml();wireMineActions();} }
+function wireMine(){
+  const q=document.getElementById('mineSearch'); if(!q) return;
+  q.oninput=()=>{mineState.q=q.value;renderMineList();};
+  const sort=document.getElementById('mineSort'),type=document.getElementById('mineType'),lang=document.getElementById('mineLang');
+  sort.value=mineState.sort;type.value=mineState.type;lang.value=mineState.lang;
+  sort.onchange=()=>{mineState.sort=sort.value;renderMineList();}; type.onchange=()=>{mineState.type=type.value;renderMineList();};
+  lang.onchange=()=>{mineState.lang=lang.value;renderMineList();}; wireMineActions();
 }
 function findTr(id){ return transcripts.find(t=>t.id===id); }
 function copyTr(id){ const t=findTr(id); if(t){ navigator.clipboard.writeText(t.text); toast(T('copied')); } }
-function delTr(id){ confirmBox(T('del_q'),()=>{ transcripts=transcripts.filter(t=>t.id!==id); persistTr(); go('mine'); }, T('del')); }
+function exportTr(id){ const t=findTr(id); if(t) download((transcriptTitle(t)||'transcript').replace(/[\\/:*?"<>|]/g,'-')+'.txt',t.text,'text/plain'); }
+function removeTranscriptFromApp(id,message){transcripts=transcripts.filter(t=>t.id!==id);if(persistTr()){go('mine');if(message)toast(message);}}
+function delTr(id){
+  const t=findTr(id);if(!t)return;
+  if(!t.deviceFile){confirmBox(T('del_q'),()=>removeTranscriptFromApp(id),T('del'));return;}
+  modal(`<div class="h2">${T('delete_where')}</div><p class="hint">📁 ${esc(t.deviceFile.name||T('device_copy'))}</p>
+    <button class="btn danger" id="delAppOnly">${T('delete_app_only')}</button>
+    <button class="btn danger" id="delBoth">${T('delete_both')}</button>
+    <button class="btn ghost" onclick="closeModal()">${T('cancel')}</button>`);
+  document.getElementById('delAppOnly').onclick=()=>{closeModal();removeTranscriptFromApp(id,T('deleted_app_only'));};
+  document.getElementById('delBoth').onclick=async()=>{const b=document.getElementById('delBoth');b.disabled=true;
+    if(await deleteDeviceCopy(t)){closeModal();removeTranscriptFromApp(id,T('deleted_both'));}
+    else{b.disabled=false;toast(T('delete_device_failed'));}};
+}
 function openTr(id){ const t=findTr(id); if(!t) return;
-  modal(`<div class="h2">${fmtDate(t.at)}</div>
+  modal(`<label>${T('tr_title')}</label><input id="mTitle" value="${esc(transcriptTitle(t))}">
+    <div class="hint">${fmtDate(t.at)} · ${transcriptWords(t)} ${T('words')}</div>
     <textarea id="mEdit" style="min-height:200px">${esc(t.text)}</textarea>
     <div class="row" style="margin-top:10px">
       <button class="btn sm" id="mSave">💾 ${T('savehist')}</button>
@@ -693,7 +1064,8 @@ function openTr(id){ const t=findTr(id); if(!t) return;
       <button class="btn sm danger" id="mDel">🗑️ ${T('del')}</button>
       <button class="btn sm ghost" onclick="closeModal()">${T('close')}</button>
     </div>`);
-  document.getElementById('mSave').onclick=()=>{ t.text=document.getElementById('mEdit').value; persistTr(); closeModal(); toast(T('saved')); go('mine'); };
+  document.getElementById('mSave').onclick=()=>{ t.title=document.getElementById('mTitle').value.trim(); t.text=document.getElementById('mEdit').value;
+    if(persistTr()){ closeModal(); toast(T('saved')); if(S.deviceSaveAuto)writeTranscriptToDevice(t,false);go('mine'); } };
   document.getElementById('mCopy').onclick=()=>{ navigator.clipboard.writeText(document.getElementById('mEdit').value); toast(T('copied')); };
   document.getElementById('mDel').onclick=()=>{ closeModal(); delTr(id); };
   const ms=document.getElementById('mSrt'); if(ms) ms.onclick=()=>download('subtitles.srt', toSRT(t.segments),'text/plain');
@@ -725,11 +1097,36 @@ function viewSettings(){
     <button class="btn primary" onclick="go('ai')">🤖 ${T('ai_title')}</button>
   </div>
   <div class="card">
+    <div class="h2">🛡️ ${T('permissions_storage')}</div>
+    <label>${T('mic_app')}</label>
+    <div class="seg" id="micPref"><button data-v="on" class="${S.micEnabled?'on':''}">${T('enabled')}</button><button data-v="off" class="${S.micEnabled?'':'on'}">${T('disabled')}</button></div>
+    <div class="statusrow"><span>${T('mic_permission')}</span><span class="statusvalue" id="micPermission">…</span></div>
+    <button class="btn sm" id="btnMicPermission" style="margin-top:10px">🎙️ ${T('request_mic')}</button>
+    <div class="statusrow" style="margin-top:10px"><span>${T('transcripts_count')}</span><span class="statusvalue">${transcripts.length}</span></div>
+    <div class="statusrow"><span>${T('storage_local')}</span><span class="statusvalue" id="localStorageSize">…</span></div>
+    <div class="statusrow"><span>${T('storage_browser')}</span><span class="statusvalue" id="browserStorageUse">…</span></div>
+    <div class="statusrow"><span>${T('storage_quota')}</span><span class="statusvalue" id="browserStorageQuota">…</span></div>
+    <div class="statusrow"><span>${T('persistent_storage')}</span><span class="statusvalue" id="persistentStatus">…</span></div>
+    <button class="btn sm" id="btnPersistent" style="margin-top:10px">💾 ${T('request_persistent')}</button>
+    <div class="statusrow" style="margin-top:10px"><span>${T('online_status')}</span><span class="statusvalue" id="onlineStatus">…</span></div>
+    <div class="statusrow"><span>PWA</span><span class="statusvalue" id="pwaStatus">…</span></div>
+    <button class="btn sm" id="btnInstallPwa" style="margin-top:10px">📲 ${T('install_app')}</button>
+    <div class="statusrow"><span>${T('speech_support')}</span><span class="statusvalue" id="speechStatus">…</span></div>
+    <div class="statusrow"><span>${T('folder_support')}</span><span class="statusvalue" id="folderStatus">…</span></div>
+    <div class="statusrow"><span>${T('folder_files_size')}</span><span class="statusvalue" id="folderFilesSize">…</span></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" id="btnFolderConnect">📁 ${T('connect_folder')}</button><button class="btn sm ghost" id="btnFolderDisconnect">${T('disconnect_folder')}</button></div>
+    <label>${T('auto_save_txt')}</label><div class="seg" id="folderAuto"><button data-v="on" class="${S.deviceSaveAuto?'on':''}">${T('enabled')}</button><button data-v="off" class="${S.deviceSaveAuto?'':'on'}">${T('disabled')}</button></div>
+    <label>${T('save_audio_copy')}</label><div class="seg" id="folderAudio"><button data-v="on" class="${S.deviceSaveAudio?'on':''}">${T('enabled')}</button><button data-v="off" class="${S.deviceSaveAudio?'':'on'}">${T('disabled')}</button></div>
+    <p class="hint">${T('audio_copy_note')}</p>
+    <p class="hint">${T('folder_disconnected_note')}</p>
+  </div>
+  <div class="card">
     <div class="h2">${T('backup')}</div>
     <div class="row">
       <button class="btn sm" id="btnBackup">⬇️ ${T('backup')}</button>
       <button class="btn sm" id="btnRestore">⬆️ ${T('restore')}</button>
     </div>
+    <button class="btn sm ghost" id="btnBackupKeys" style="margin-top:8px">🔐 ${T('backup_keys')}</button>
     <button class="btn danger" id="btnDelAll" style="margin-top:12px">🗑️ ${T('deleteall')}</button>
   </div>
   <input type="file" id="restoreFile" accept="application/json" class="hidden">`;
@@ -741,26 +1138,187 @@ function wireSettings(){
     S.palette=sw.dataset.p; persist(); go('settings'); }));
   document.getElementById('thSeg').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
     S.theme=b.dataset.t; persist(); go('settings'); }));
-  document.getElementById('btnBackup').onclick=doBackup;
+  document.getElementById('micPref').querySelectorAll('button').forEach(b=>b.onclick=async()=>{
+    S.micEnabled=b.dataset.v==='on'; if(!persist()) return; go('settings');
+    if(S.micEnabled) await requestMicrophonePermission();
+  });
+  document.getElementById('btnMicPermission').onclick=requestMicrophonePermission;
+  document.getElementById('btnPersistent').onclick=requestPersistentStorage;
+  document.getElementById('btnInstallPwa').onclick=installPwa;
+  document.getElementById('btnFolderConnect').onclick=()=>deviceFolderHandle?reconnectDeviceFolder():connectDeviceFolder();
+  document.getElementById('btnFolderDisconnect').onclick=disconnectDeviceFolder;
+  document.getElementById('folderAuto').querySelectorAll('button').forEach(b=>b.onclick=async()=>{S.deviceSaveAuto=b.dataset.v==='on';persist();go('settings');if(S.deviceSaveAuto&&!deviceFolderHandle)await connectDeviceFolder();});
+  document.getElementById('folderAudio').querySelectorAll('button').forEach(b=>b.onclick=async()=>{S.deviceSaveAudio=b.dataset.v==='on';persist();go('settings');if(S.deviceSaveAudio&&!deviceFolderHandle)await connectDeviceFolder();});
+  document.getElementById('btnBackup').onclick=()=>doBackup(false);
+  document.getElementById('btnBackupKeys').onclick=()=>confirmBox(T('backup_keys_q'),()=>doBackup(true));
   document.getElementById('btnRestore').onclick=()=>document.getElementById('restoreFile').click();
   document.getElementById('restoreFile').addEventListener('change',doRestore);
-  document.getElementById('btnDelAll').onclick=()=>confirmBox(T('delall_q'),()=>{
+  document.getElementById('btnDelAll').onclick=()=>confirmBox(T('delall_q')+(transcripts.some(t=>t.deviceFile)?' '+T('deleteall_external'):''),()=>{
     confirmBox(T('delall_q2'),()=>{ transcripts=[]; persistTr();
-      S={username:'',lang:S.lang,palette:'goldblack',theme:'dark',ai:{provider:'web',keys:{},models:{},base:'',connected:{}},wantTs:false};
-      persist(); go('home'); }, T('deleteall')); }, T('deleteall'));
+      S={username:'',lang:S.lang,palette:'goldblack',theme:'dark',ai:{provider:'web',keys:{},models:{},base:'',connected:{}},wantTs:false,micEnabled:true,deviceSaveAuto:false,deviceSaveAudio:false};
+      persist(); removeFolderHandle(); deviceFolderHandle=null; deviceFolderPermission='none'; go('home'); }, T('deleteall')); }, T('deleteall'));
+  refreshDeviceCenter();
 }
-function doBackup(){
-  const data={ app:'TimlulAI', v:1, at:Date.now(), user:S.username, settings:S, transcripts };
-  download('timlulai-backup.json', JSON.stringify(data,null,2), 'application/json');
+let microphonePermissionStatus=null;
+let deferredInstallPrompt=null,pendingServiceWorker=null,reloadingForUpdate=false;
+function refreshAppNotice(){
+  const root=document.getElementById('noticeRoot');if(!root)return;
+  if(pendingServiceWorker){root.innerHTML=`<div class="appnotice"><span>🔄 ${T('update_ready')}</span><button class="btn sm gold" id="applyUpdate">${T('update_now')}</button></div>`;
+    document.getElementById('applyUpdate').onclick=()=>pendingServiceWorker.postMessage({type:'SKIP_WAITING'});}
+  else if(!navigator.onLine)root.innerHTML=`<div class="appnotice"><span>📴 ${T('offline_mode')}</span></div>`;
+  else root.innerHTML='';
+}
+async function installPwa(){
+  if(!deferredInstallPrompt){toast(T('install_unavailable'));return;}
+  deferredInstallPrompt.prompt();try{await deferredInstallPrompt.userChoice;}catch(e){}deferredInstallPrompt=null;refreshDeviceCenter();
+}
+function setStatus(id,text,kind){ const e=document.getElementById(id); if(e){e.textContent=(kind==='ok'?'🟢 ':kind==='bad'?'🔴 ':kind==='warn'?'🟡 ':'⚪ ')+text;} }
+function formatBytes(n){ if(!Number.isFinite(n)) return '—'; const u=['B','KB','MB','GB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return `${n.toFixed(i?1:0)} ${u[i]}`; }
+function appDataSize(){
+  try{ let n=0; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith(PFX))n+=new Blob([k+(localStorage.getItem(k)||'')]).size;} return n; }catch(e){return NaN;}
+}
+async function getMicPermissionState(){
+  if(!navigator.permissions||!navigator.permissions.query) return 'unknown';
+  try{ microphonePermissionStatus=await navigator.permissions.query({name:'microphone'});
+    microphonePermissionStatus.onchange=()=>{if(screen==='settings')refreshDeviceCenter();}; return microphonePermissionStatus.state; }
+  catch(e){return 'unknown';}
+}
+function showMicPermissionHelp(){ modal(`<div class="h2">🎙️ ${T('mic_permission')}</div><p>${T('mic_help')}</p><button class="btn gold" onclick="closeModal()">${T('ok')}</button>`); }
+async function requestMicrophonePermission(){
+  S.micEnabled=true; persist();
+  const state=await getMicPermissionState(); if(state==='denied'){showMicPermissionHelp();refreshDeviceCenter();return;}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast(T('unsupported'));return;}
+  try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});stream.getTracks().forEach(t=>t.stop());toast(T('granted'));}
+  catch(err){if(err&&err.name==='NotAllowedError')showMicPermissionHelp();else toast(T('err'));}
+  refreshDeviceCenter();
+}
+async function requestPersistentStorage(){
+  if(!navigator.storage||!navigator.storage.persist){toast(T('unsupported'));return;}
+  try{const ok=await navigator.storage.persist();toast(ok?T('granted'):T('denied'));}catch(e){toast(T('unsupported'));} refreshDeviceCenter();
+}
+async function refreshDeviceCenter(){
+  if(screen!=='settings') return;
+  const mic=await getMicPermissionState(); setStatus('micPermission',T(mic),mic==='granted'?'ok':mic==='denied'?'bad':mic==='prompt'?'warn':'');
+  const micBtn=document.getElementById('btnMicPermission'); if(micBtn) micBtn.textContent=mic==='denied'?`⚙️ ${T('mic_permission')}`:`🎙️ ${T('request_mic')}`;
+  const local=document.getElementById('localStorageSize'); if(local)local.textContent=formatBytes(appDataSize());
+  let persisted=null,estimate=null;
+  try{if(navigator.storage&&navigator.storage.persisted)persisted=await navigator.storage.persisted();if(navigator.storage&&navigator.storage.estimate)estimate=await navigator.storage.estimate();}catch(e){}
+  setStatus('persistentStatus',persisted?T('enabled'):T('disabled'),persisted?'ok':'warn');
+  const pb=document.getElementById('btnPersistent'); if(pb)pb.disabled=!navigator.storage||!navigator.storage.persist||!!persisted;
+  const use=document.getElementById('browserStorageUse'),quota=document.getElementById('browserStorageQuota');
+  if(use)use.textContent=formatBytes(estimate&&estimate.usage);if(quota)quota.textContent=formatBytes(estimate&&estimate.quota);
+  setStatus('onlineStatus',navigator.onLine?T('enabled'):T('disabled'),navigator.onLine?'ok':'bad');
+  const standalone=window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  setStatus('pwaStatus',standalone?T('installed'):T('browser_mode'),standalone?'ok':'warn');
+  const install=document.getElementById('btnInstallPwa');if(install)install.disabled=standalone;
+  const speech=!!(window.SpeechRecognition||window.webkitSpeechRecognition);setStatus('speechStatus',speech?T('supported'):T('unsupported'),speech?'ok':'bad');
+  const folder='showDirectoryPicker' in window;
+  if(folder&&deviceFolderHandle){deviceFolderPermission=await folderPermission(deviceFolderHandle,false);setStatus('folderStatus',deviceFolderPermission==='granted'?`${T('folder_connected')}: ${deviceFolderHandle.name}`:T('reconnect_folder'),deviceFolderPermission==='granted'?'ok':'warn');}
+  else setStatus('folderStatus',folder?T('folder_not_connected'):T('unsupported'),folder?'warn':'bad');
+  const fc=document.getElementById('btnFolderConnect'),fd=document.getElementById('btnFolderDisconnect');
+  if(fc){fc.disabled=!folder;fc.textContent=deviceFolderHandle?`🔄 ${T('reconnect_folder')}`:`📁 ${T('connect_folder')}`;}if(fd)fd.disabled=!deviceFolderHandle;
+  const folderSize=document.getElementById('folderFilesSize');if(folderSize)folderSize.textContent=formatBytes(await deviceFolderSize());
+}
+function backupPayload(includeKeys){
+  const settings=JSON.parse(JSON.stringify(S));
+  settings.ai=settings.ai||{};
+  if(!includeKeys){ settings.ai.keys={}; settings.ai.connected={}; }
+  return {app:'TimlulAI',schemaVersion:2,at:Date.now(),secretsIncluded:!!includeKeys,
+    user:S.username,settings,transcripts:JSON.parse(JSON.stringify(transcripts))};
+}
+function doBackup(includeKeys=false, filename){
+  const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+  const name=filename||`timlulai-backup-${includeKeys?'full-':'safe-'}${stamp}.json`;
+  download(name,JSON.stringify(backupPayload(includeKeys),null,2),'application/json');
+}
+function cleanString(v,max=2000000){ return typeof v==='string'?v.slice(0,max):''; }
+function cleanSettings(raw){
+  const a=raw&&typeof raw.ai==='object'&&raw.ai?raw.ai:{};
+  const allowedProviders=['web','gem','oai','claude','custom'];
+  const keys={},models={},connected={};
+  const consent={};
+  for(const id of allowedProviders){
+    if(typeof (a.keys||{})[id]==='string') keys[id]=a.keys[id].slice(0,1000);
+    if(typeof (a.models||{})[id]==='string') models[id]=a.models[id].slice(0,200);
+    if(typeof (a.connected||{})[id]==='boolean') connected[id]=a.connected[id];
+    if(typeof (a.consent||{})[id]==='boolean') consent[id]=a.consent[id];
+  }
+  return {
+    username:cleanString(raw.username,200),
+    lang:Object.prototype.hasOwnProperty.call(LANG,raw.lang)?raw.lang:'he',
+    palette:Object.prototype.hasOwnProperty.call(PALETTES,raw.palette)?raw.palette:'goldblack',
+    theme:raw.theme==='light'?'light':'dark',
+    ai:{provider:allowedProviders.includes(a.provider)?a.provider:'web',keys,models,
+      base:cleanString(a.base,1000),connected,consent,
+      gemModels:Array.isArray(a.gemModels)?a.gemModels.filter(x=>typeof x==='string').slice(0,500).map(x=>x.slice(0,200)):[]},
+    wantTs:!!raw.wantTs,
+    micEnabled:raw.micEnabled!==false,
+    deviceSaveAuto:!!raw.deviceSaveAuto,
+    deviceSaveAudio:!!raw.deviceSaveAudio
+  };
+}
+function cleanTranscript(t,i){
+  if(!t||typeof t!=='object'||typeof t.text!=='string') throw new Error('bad transcript');
+  const segs=Array.isArray(t.segments)?t.segments.slice(0,100000).map(s=>({
+    start:Number.isFinite(+s.start)?+s.start:0,end:Number.isFinite(+s.end)?+s.end:0,text:cleanString(s.text)
+  })):null;
+  return {text:cleanString(t.text),title:cleanString(t.title,500),segments:segs,lang:cleanString(t.lang,20),
+    at:Number.isFinite(+t.at)?+t.at:Date.now(),live:!!t.live,name:cleanString(t.name,500),
+    deviceFile:t.deviceFile&&typeof t.deviceFile==='object'?{name:cleanString(t.deviceFile.name,500),audioName:cleanString(t.deviceFile.audioName,500),folder:cleanString(t.deviceFile.folder,100),savedAt:Number.isFinite(+t.deviceFile.savedAt)?+t.deviceFile.savedAt:0,textBytes:Number.isFinite(+t.deviceFile.textBytes)?+t.deviceFile.textBytes:0,audioBytes:Number.isFinite(+t.deviceFile.audioBytes)?+t.deviceFile.audioBytes:0}:null,
+    id:cleanString(t.id,100)||`${Date.now()}r${i}`};
+}
+function parseBackup(text){
+  const d=JSON.parse(text);
+  if(!d||typeof d!=='object'||!Array.isArray(d.transcripts)||!d.settings||typeof d.settings!=='object') throw new Error('bad backup');
+  if(d.app&&d.app!=='TimlulAI'&&d.app!=='Kolmus') throw new Error('wrong app');
+  if(d.schemaVersion&&d.schemaVersion>2) throw new Error('unsupported version');
+  if(d.transcripts.length>10000) throw new Error('too many transcripts');
+  return {settings:cleanSettings(d.settings),transcripts:d.transcripts.map(cleanTranscript),
+    secretsIncluded:!!d.secretsIncluded||!!(d.settings.ai&&d.settings.ai.keys&&Object.keys(d.settings.ai.keys).length)};
+}
+function commitRestore(data,mode){
+  const oldSettings=store.get(PFX+'settings'),oldTranscripts=store.get(PFX+'transcripts');
+  const nextSettings=mode==='merge'?JSON.parse(JSON.stringify(S)):data.settings;
+  if(mode!=='merge'&&!data.secretsIncluded){ nextSettings.ai.keys={...((S.ai&&S.ai.keys)||{})}; nextSettings.ai.connected={...((S.ai&&S.ai.connected)||{})}; }
+  const merged=mode==='merge'
+    ? [...data.transcripts,...transcripts].filter((t,i,a)=>a.findIndex(x=>x.id===t.id)===i)
+    : data.transcripts;
+  try{
+    localStorage.setItem(PFX+'settings',JSON.stringify(nextSettings));
+    localStorage.setItem(PFX+'transcripts',JSON.stringify(merged));
+    if(!localStorage.getItem(PFX+'settings')||!localStorage.getItem(PFX+'transcripts')) throw new Error('verify failed');
+    S=nextSettings; transcripts=merged; return true;
+  }catch(err){
+    try{
+      oldSettings==null?localStorage.removeItem(PFX+'settings'):localStorage.setItem(PFX+'settings',oldSettings);
+      oldTranscripts==null?localStorage.removeItem(PFX+'transcripts'):localStorage.setItem(PFX+'transcripts',oldTranscripts);
+    }catch(e){}
+    return false;
+  }
+}
+function restorePreview(data){
+  modal(`<div class="h2">${T('restore_found')}: ${data.transcripts.length} ${T('restore_items')}</div>
+    <p class="hint">${T('restore_note')}</p>
+    <div class="row" style="margin-top:14px">
+      <button class="btn ghost" id="restoreCancel">${T('cancel')}</button>
+      <button class="btn sm" id="restoreMerge">${T('restore_merge')}</button>
+      <button class="btn danger" id="restoreReplace">${T('restore_replace')}</button>
+    </div>`);
+  document.getElementById('restoreCancel').onclick=closeModal;
+  const apply=mode=>{
+    doBackup(false,`timlulai-before-restore-${new Date().toISOString().replace(/[:.]/g,'-')}.json`);
+    if(commitRestore(data,mode)){ closeModal(); go('home'); toast(T('restore_done')); }
+    else { closeModal(); toast(T('restore_failed')); }
+  };
+  document.getElementById('restoreMerge').onclick=()=>apply('merge');
+  document.getElementById('restoreReplace').onclick=()=>apply('replace');
 }
 function doRestore(e){
-  const f=e.target.files[0]; if(!f) return; const r=new FileReader();
-  r.onload=()=>{ try{ const d=JSON.parse(r.result);
-    confirmBox(T('restore_q'),()=>{
-      if(d.transcripts) { transcripts=d.transcripts; persistTr(); }
-      if(d.settings){ S=d.settings; persist(); }
-      go('home'); toast(T('saved'));
-    }); }catch(err){ toast(T('err')); } };
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  if(f.size>25*1048576){ toast(T('restore_large')); return; }
+  const r=new FileReader();
+  r.onload=()=>{ try{ restorePreview(parseBackup(r.result)); }catch(err){ toast(T('restore_bad')); } };
+  r.onerror=()=>toast(T('restore_bad'));
   r.readAsText(f);
 }
 
@@ -809,7 +1367,7 @@ function showProvConfig(id){
     <div class="h2">${p.name()}</div>
     ${p.base?`<label>${T('baseurl')}</label><input id="cfgBase" value="${esc(S.ai.base||'http://localhost:11434')}" placeholder="http://localhost:11434">`:''}
     ${p.key?`<label>${T('key')}</label><input id="cfgKey" type="password" value="${esc(curKey)}" placeholder="sk-...">`:''}
-    ${p.models?`<label>${T('model')}</label><select id="cfgModel">${modelList.map(m=>`<option ${m===curModel?'selected':''}>${m}</option>`).join('')}</select>
+    ${p.models?`<label>${T('model')}</label><select id="cfgModel">${modelList.map(m=>`<option ${m===curModel?'selected':''}>${esc(m)}</option>`).join('')}</select>
       ${id==='gem'?`<button class="btn sm" id="cfgRefresh" style="margin-top:8px">🔄 ${T('refresh_models')}</button>`:''}`:''}
     <div class="row" style="margin-top:12px">
       <button class="btn sm gold" id="cfgSave">💾 ${T('save_key')}</button>
@@ -824,14 +1382,15 @@ function showProvConfig(id){
   </div>`;
   const kEl=document.getElementById('cfgKey'), mEl=document.getElementById('cfgModel'), bEl=document.getElementById('cfgBase');
   document.getElementById('cfgSave').onclick=()=>{
+    if(bEl){ try{ bEl.value=safeBaseUrl(bEl.value); }catch(err){ toast(err.message); return; } }
     if(kEl) S.ai.keys[id]=kEl.value.trim();
     if(mEl) S.ai.models[id]=mEl.value;
     if(bEl) S.ai.base=bEl.value.trim();
-    persist(); toast(T('saved'));
+    if(persist()) toast(T('saved'));
   };
   const rf=document.getElementById('cfgRefresh');
   if(rf) rf.onclick=()=>{ if(kEl) S.ai.keys.gem=kEl.value.trim(); persist(); refreshGeminiModels(); };
-  document.getElementById('cfgDisc').onclick=()=>{ delete S.ai.keys[id]; if(S.ai.connected) delete S.ai.connected[id];
+  document.getElementById('cfgDisc').onclick=()=>{ delete S.ai.keys[id]; if(S.ai.connected) delete S.ai.connected[id]; if(S.ai.consent) delete S.ai.consent[id];
     persist(); go('ai'); };
   document.getElementById('cfgTest').onclick=async()=>{
     const st=document.getElementById('cfgStatus'); st.textContent=T('testing');
@@ -846,7 +1405,7 @@ async function testProvider(id){
   if(id==='claude'){ return callChat('claude','Reply with: ok'); }
   if(id==='oai'){ const r=await fetch('https://api.openai.com/v1/models',{headers:{'Authorization':'Bearer '+S.ai.keys.oai}});
     if(!r.ok) throw new Error('OpenAI '+r.status); return true; }
-  if(id==='custom'){ const base=(S.ai.base||'').replace(/\/$/,''); const r=await fetch(base+'/v1/models',
+  if(id==='custom'){ const base=safeBaseUrl(S.ai.base||''); const r=await fetch(base+'/v1/models',
     {headers: S.ai.keys.custom?{'Authorization':'Bearer '+S.ai.keys.custom}:{}}); if(!r.ok) throw new Error('HTTP '+r.status); return true; }
 }
 async function refreshGeminiModels(){
@@ -854,7 +1413,7 @@ async function refreshGeminiModels(){
   if(!key){ toast(T('need_key')); return; }
   if(st) st.textContent=T('testing');
   try{
-    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}&pageSize=200`);
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':key}});
     if(!r.ok) throw new Error('HTTP '+r.status+': '+(await r.text()).slice(0,80));
     const d=await r.json();
     const list=(d.models||[])
@@ -880,7 +1439,7 @@ function viewAbout(){
   </div>
   <div class="card">
     <div class="tr" style="background:transparent;border:none;padding:0">
-      <p><b>${T('version')}:</b> 1.0</p>
+    <p><b>${T('version')}:</b> 1.0.19</p>
       <p><b>${T('developer')}:</b> Barak Aflalo</p>
       <p><b>${T('platform')}:</b> PWA · HTML5</p>
       <p><b>${T('storage')}:</b> ${T('on_device')}</p>
@@ -923,17 +1482,29 @@ function onboarding(){
     document.getElementById('obSkip').onclick=fin;
     document.getElementById('obNext').onclick=()=>{ if(i<steps.length-1){i++;show();} else fin(); };
   }
-  function fin(){ save('onboarded',true); closeModal(); }
+  function fin(){ if(!save('onboarded',true)) warnStorage(); else closeModal(); }
   show();
 }
 
 /* ---------- boot ---------- */
 render();
 onboarding();
+readFolderHandle().then(async h=>{deviceFolderHandle=h;if(h)deviceFolderPermission=await folderPermission(h,false);if(screen==='settings')refreshDeviceCenter();});
+window.addEventListener('beforeunload',e=>{ if(current&&current.dirty&&current.text){e.preventDefault();e.returnValue='';} });
+window.addEventListener('online',()=>{refreshDeviceCenter();refreshAppNotice();});
+window.addEventListener('offline',()=>{refreshDeviceCenter();refreshAppNotice();});
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;if(screen==='settings')refreshDeviceCenter();});
+window.addEventListener('appinstalled',()=>{deferredInstallPrompt=null;if(screen==='settings')refreshDeviceCenter();});
+refreshAppNotice();
 
 /* service worker */
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>{
-  navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    const ready=w=>{if(navigator.serviceWorker.controller&&w){pendingServiceWorker=w;refreshAppNotice();}};
+    if(reg.waiting)ready(reg.waiting);
+    reg.addEventListener('updatefound',()=>{const w=reg.installing;if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed')ready(w);});});
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloadingForUpdate)return;reloadingForUpdate=true;location.reload();});
+  }).catch(()=>{}); }); }
 </script>
 </body>
 </html>

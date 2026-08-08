@@ -1,6 +1,6 @@
 /* TimlulAI service worker */
-const VERSION = 'timlulai-v21';
-const CORE = ['./', './index.html', './manifest.json', './privacy_policy.html',
+const VERSION = 'timlulai-v41';
+const CORE = ['./', './index.html', './manifest.json', './privacy_policy.html', './terms_of_use.html',
               './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(CORE)));
